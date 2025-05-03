@@ -22,17 +22,6 @@ const config = {
       valueMultiplier: 1.5,
       icon: "👉",
       requires: { upgradeIndex: 0, minLevel: 5 }
-    },
-    {
-      name: "Платиновый палец",
-      description: "Огромное увеличение клика",
-      levels: 3,
-      baseCost: 1000,
-      costMultiplier: 3,
-      baseValue: 0.0001,
-      valueMultiplier: 2,
-      icon: "👌",
-      requires: { upgradeIndex: 1, minLevel: 3 }
     }
   ],
   autoClickUpgrades: [
@@ -56,17 +45,6 @@ const config = {
       valueMultiplier: 1.7,
       icon: "⚒️",
       requires: { upgradeIndex: 0, minLevel: 5 }
-    },
-    {
-      name: "Робот-майнер",
-      description: "Мощный автомайнинг",
-      levels: 3,
-      baseCost: 5000,
-      costMultiplier: 3,
-      baseValue: 0.001,
-      valueMultiplier: 2,
-      icon: "🤖",
-      requires: { upgradeIndex: 1, minLevel: 3 }
     }
   ],
   adMultiplier: 2,
@@ -102,6 +80,7 @@ function initApp() {
       })
       .catch(console.error);
   } else {
+    console.log('VK Bridge не обнаружен, работаем в тестовом режиме');
     currentPlayer.id = 999;
     currentPlayer.name = "Тестовый режим";
     loadPlayerData();
@@ -115,8 +94,6 @@ function loadPlayerData() {
     try {
       const data = JSON.parse(savedData);
       Object.assign(currentPlayer, data);
-      
-      // Восстановление состояний
       calculateTotalClickValue();
       calculateTotalAutoClickValue();
       
@@ -141,7 +118,7 @@ function savePlayerData() {
 // Основные функции игры
 function handleClick() {
   currentPlayer.score += currentPlayer.totalClickValue;
-  updateCounter();
+  updateUI();
   savePlayerData();
 }
 
@@ -153,7 +130,7 @@ function startAutoClicker() {
   if (currentPlayer.totalAutoClickValue > 0) {
     currentPlayer.autoClickInterval = setInterval(() => {
       currentPlayer.score += currentPlayer.totalAutoClickValue;
-      updateCounter();
+      updateUI();
       savePlayerData();
     }, 1000);
   }
@@ -211,7 +188,6 @@ function buyClickUpgrade(upgradeIndex) {
   if (currentPlayer.score >= cost) {
     currentPlayer.score -= cost;
     playerUpgrade.level++;
-    
     calculateTotalClickValue();
     updateUI();
     savePlayerData();
@@ -243,7 +219,6 @@ function buyAutoClickUpgrade(upgradeIndex) {
   if (currentPlayer.score >= cost) {
     currentPlayer.score -= cost;
     playerUpgrade.level++;
-    
     calculateTotalAutoClickValue();
     startAutoClicker();
     updateUI();
@@ -263,10 +238,22 @@ function showAdAndActivateMultiplier() {
   
   if (typeof vkBridge !== 'undefined') {
     vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' })
-      .then(data => data.result && activateAdMultiplier())
-      .catch(activateAdMultiplier);
+      .then(data => {
+        if (data.result) {
+          activateAdMultiplier();
+        } else {
+          showMessage("Реклама не была показана");
+        }
+      })
+      .catch(error => {
+        console.error('Ошибка показа рекламы:', error);
+        showMessage("Ошибка при показе рекламы");
+      });
   } else {
-    activateAdMultiplier();
+    // Режим тестирования без VK Bridge
+    if (confirm('В реальном приложении здесь будет реклама. Активировать множитель?')) {
+      activateAdMultiplier();
+    }
   }
 }
 
@@ -288,15 +275,6 @@ function endAdMultiplier() {
   updateUI();
   savePlayerData();
   showMessage("Действие множителя закончилось");
-}
-
-function startAdMultiplierCheck() {
-  setInterval(() => {
-    if (currentPlayer.adMultiplierActive && Date.now() >= currentPlayer.adMultiplierEndTime) {
-      endAdMultiplier();
-    }
-    updateAdButton();
-  }, 1000);
 }
 
 // Интерфейс
@@ -456,29 +434,23 @@ function showMessage(text) {
 }
 
 function switchTab(tabName) {
-  // Скрыть все вкладки
   document.querySelectorAll('.tab-content').forEach(tab => {
     tab.classList.remove('active');
   });
-  
-  // Деактивировать все кнопки
   document.querySelectorAll('.tab-button').forEach(button => {
     button.classList.remove('active');
   });
   
-  // Показать выбранную вкладку
   const activeTab = document.getElementById(tabName);
   if (activeTab) {
     activeTab.classList.add('active');
   }
   
-  // Активировать соответствующую кнопку
   const activeButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
   if (activeButton) {
     activeButton.classList.add('active');
   }
   
-  // Особые действия для вкладок
   if (tabName === 'upgrades') {
     renderUpgrades();
   } else if (tabName === 'top') {
@@ -492,9 +464,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
   document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
   
-  document.getElementById('upgradesTabButton')?.addEventListener('click', () => switchTab('upgrades'));
-  document.getElementById('clickerTabButton')?.addEventListener('click', () => switchTab('clicker'));
-  document.getElementById('topTabButton')?.addEventListener('click', () => switchTab('top'));
+  document.querySelectorAll('.tab-button').forEach(button => {
+    button.addEventListener('click', () => {
+      switchTab(button.getAttribute('data-tab'));
+    });
+  });
   
   // Глобальные функции для вызова из HTML
   window.buyClickUpgrade = buyClickUpgrade;
@@ -503,7 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initApp();
 });
 
-// База данных игроков (для демонстрации)
+// Тестовая база данных игроков
 const playersDB = [
   { id: 1, name: "Игрок 1", score: 100.123456 },
   { id: 2, name: "Игрок 2", score: 90.654321 },
