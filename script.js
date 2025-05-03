@@ -332,14 +332,24 @@ function updateAdButton() {
   
   const now = Date.now();
   
+  function formatTime(seconds) {
+    if (seconds < 60) {
+      return `${seconds}с`;
+    } else {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}м ${secs < 10 ? '0' : ''}${secs}с`;
+    }
+  }
+  
   if (currentPlayer.adMultiplierActive) {
-    const timeLeft = Math.ceil((currentPlayer.adMultiplierEndTime - now) / 1000);
-    adButton.textContent = `Умножение активное (${timeLeft}с)`;
+    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adMultiplierEndTime - now) / 1000));
+    adButton.textContent = `Умножение активное (${formatTime(timeLeft)})`;
     adButton.disabled = true;
     adButton.classList.add('active');
   } else if (now < currentPlayer.adButtonCooldownEnd) {
-    const cooldownLeft = Math.ceil((currentPlayer.adButtonCooldownEnd - now) / 1000);
-    adButton.textContent = `Доступно через ${cooldownLeft}с`;
+    const cooldownLeft = Math.max(0, Math.ceil((currentPlayer.adButtonCooldownEnd - now) / 1000));
+    adButton.textContent = `Доступно через ${formatTime(cooldownLeft)}`;
     adButton.disabled = true;
     adButton.classList.remove('active');
   } else {
