@@ -48,8 +48,9 @@ const config = {
     }
   ],
   adMultiplier: 2,
-  adDuration: 60000,
-  adCooldown: 180000
+  adDuration: 60000,    // 1 минута
+  adCooldown: 180000,   // 3 минуты
+  adRetryDelay: 30000   // 30 секунд между попытками
 };
 
 // Данные игрока
@@ -65,6 +66,7 @@ let currentPlayer = {
   adMultiplierActive: false,
   adMultiplierEndTime: 0,
   adButtonCooldownEnd: 0,
+  lastAdAttemptTime: 0,
   autoClickInterval: null
 };
 
@@ -108,7 +110,6 @@ function loadPlayerData() {
       const data = JSON.parse(savedData);
       Object.assign(currentPlayer, data);
       
-      // Восстановление состояний
       calculateTotalClickValue();
       calculateTotalAutoClickValue();
       
@@ -246,53 +247,66 @@ function buyAutoClickUpgrade(upgradeIndex) {
   }
 }
 
-// Система рекламы
+// Улучшенная система рекламы
 async function showAdAndActivateMultiplier() {
   const now = Date.now();
+  
   if (currentPlayer.adMultiplierActive || now < currentPlayer.adButtonCooldownEnd) {
     return;
   }
-
+  
+  if (now - currentPlayer.lastAdAttemptTime < config.adRetryDelay) {
+    showMessage("Пожалуйста, подождите перед повторной попыткой");
+    return;
+  }
+  
+  currentPlayer.lastAdAttemptTime = now;
+  updateAdButton();
+  
   try {
     showMessage("Загрузка рекламы...");
     
     if (typeof vkBridge !== 'undefined') {
-      // Проверяем доступность рекламы
       const checkResult = await vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
       if (!checkResult.result || !checkResult.result.is_available) {
-        throw new Error('Реклама недоступна');
+        throw new Error("Реклама временно недоступна. Попробуйте позже.");
       }
       
-      // Показываем рекламу
       const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
-      if (!adResult.result) {
-        throw new Error('Показ рекламы не удался');
+      if (!adResult.result || adResult.result.status === 'closed') {
+        throw new Error("Реклама не была показана полностью");
       }
     } else {
-      // Тестовый режим - запрашиваем подтверждение
-      if (!confirm('В реальном приложении здесь будет реклама. Активировать множитель?')) {
-        return;
+      const userConfirmed = confirm('В реальном приложении здесь будет реклама. Активировать множитель?');
+      if (!userConfirmed) {
+        throw new Error("Пользователь отменил действие");
       }
     }
     
-    // Активируем множитель после успешного показа рекламы
     activateAdMultiplier();
   } catch (error) {
-    console.error('Ошибка показа рекламы:', error);
-    showMessage("Не удалось показать рекламу");
+    console.error('Ошибка рекламы:', error);
+    showMessage(error.message || "Не удалось загрузить рекламу");
+    currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay;
+    updateAdButton();
   }
 }
 
 function activateAdMultiplier() {
+  const now = Date.now();
   currentPlayer.adMultiplierActive = true;
-  currentPlayer.adMultiplierEndTime = Date.now() + config.adDuration;
-  currentPlayer.adButtonCooldownEnd = Date.now() + config.adDuration + config.adCooldown;
+  currentPlayer.adMultiplierEndTime = now + config.adDuration;
+  currentPlayer.adButtonCooldownEnd = now + config.adDuration + config.adCooldown;
   
   calculateTotalClickValue();
-  setTimeout(endAdMultiplier, config.adDuration);
   updateUI();
   savePlayerData();
-  showMessage("Множитель кликов x2 активирован на 1 минуту!");
+  
+  setTimeout(() => {
+    endAdMultiplier();
+  }, config.adDuration);
+  
+  showMessage("Множитель кликов x2 активирован!");
 }
 
 function endAdMultiplier() {
@@ -333,18 +347,15 @@ function updateAdButton() {
   const now = Date.now();
   
   function formatTime(seconds) {
-    if (seconds < 60) {
-      return `${seconds}с`;
-    } else {
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
-      return `${mins}м ${secs < 10 ? '0' : ''}${secs}с`;
-    }
+    if (seconds < 60) return `${seconds}с`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}м ${secs < 10 ? '0' : ''}${secs}с`;
   }
   
   if (currentPlayer.adMultiplierActive) {
     const timeLeft = Math.max(0, Math.ceil((currentPlayer.adMultiplierEndTime - now) / 1000));
-    adButton.textContent = `Умножение активное (${formatTime(timeLeft)})`;
+    adButton.textContent = `Активно (${formatTime(timeLeft)})`;
     adButton.disabled = true;
     adButton.classList.add('active');
   } else if (now < currentPlayer.adButtonCooldownEnd) {
@@ -505,6 +516,17 @@ function switchTab(tabName) {
 
 // Инициализация при загрузке
 document.addEventListener('DOMContentLoaded', () => {
+  // Проверка AdBlock
+  window.adblockDetected = false;
+  const adCheck = document.createElement('div');
+  adCheck.innerHTML = '&nbsp;';
+  adCheck.className = 'ad-box';
+  document.body.appendChild(adCheck);
+  setTimeout(() => {
+    window.adblockDetected = adCheck.offsetHeight === 0;
+    document.body.removeChild(adCheck);
+  }, 100);
+
   // Назначение обработчиков
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
   document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
