@@ -68,32 +68,47 @@ let currentPlayer = {
   autoClickInterval: null
 };
 
-// Инициализация приложения
-function initApp() {
+// Инициализация VK Bridge
+function initVKBridge() {
   if (typeof vkBridge !== 'undefined') {
     vkBridge.send('VKWebAppInit')
-      .then(() => vkBridge.send('VKWebAppGetUserInfo'))
+      .then(() => {
+        console.log('VK Bridge инициализирован');
+        return vkBridge.send('VKWebAppGetUserInfo');
+      })
       .then(user => {
         currentPlayer.id = user.id;
         currentPlayer.name = `${user.first_name} ${user.last_name}`;
         loadPlayerData();
+        startAdMultiplierCheck();
       })
-      .catch(console.error);
+      .catch(error => {
+        console.error('Ошибка VK Bridge:', error);
+        initTestMode();
+      });
   } else {
-    console.log('VK Bridge не обнаружен, работаем в тестовом режиме');
-    currentPlayer.id = 999;
-    currentPlayer.name = "Тестовый режим";
-    loadPlayerData();
+    console.log('VK Bridge не обнаружен, активирован тестовый режим');
+    initTestMode();
   }
 }
 
-// Загрузка данных
+// Тестовый режим
+function initTestMode() {
+  currentPlayer.id = 999;
+  currentPlayer.name = "Тестовый режим";
+  loadPlayerData();
+  startAdMultiplierCheck();
+}
+
+// Загрузка данных игрока
 function loadPlayerData() {
   const savedData = localStorage.getItem('clickerData');
   if (savedData) {
     try {
       const data = JSON.parse(savedData);
       Object.assign(currentPlayer, data);
+      
+      // Восстановление состояний
       calculateTotalClickValue();
       calculateTotalAutoClickValue();
       
@@ -110,7 +125,7 @@ function loadPlayerData() {
   updateUI();
 }
 
-// Сохранение данных
+// Сохранение данных игрока
 function savePlayerData() {
   localStorage.setItem('clickerData', JSON.stringify(currentPlayer));
 }
@@ -118,7 +133,7 @@ function savePlayerData() {
 // Основные функции игры
 function handleClick() {
   currentPlayer.score += currentPlayer.totalClickValue;
-  updateUI();
+  updateCounter();
   savePlayerData();
 }
 
@@ -130,7 +145,7 @@ function startAutoClicker() {
   if (currentPlayer.totalAutoClickValue > 0) {
     currentPlayer.autoClickInterval = setInterval(() => {
       currentPlayer.score += currentPlayer.totalAutoClickValue;
-      updateUI();
+      updateCounter();
       savePlayerData();
     }, 1000);
   }
@@ -188,6 +203,7 @@ function buyClickUpgrade(upgradeIndex) {
   if (currentPlayer.score >= cost) {
     currentPlayer.score -= cost;
     playerUpgrade.level++;
+    
     calculateTotalClickValue();
     updateUI();
     savePlayerData();
@@ -219,6 +235,7 @@ function buyAutoClickUpgrade(upgradeIndex) {
   if (currentPlayer.score >= cost) {
     currentPlayer.score -= cost;
     playerUpgrade.level++;
+    
     calculateTotalAutoClickValue();
     startAutoClicker();
     updateUI();
@@ -230,30 +247,39 @@ function buyAutoClickUpgrade(upgradeIndex) {
 }
 
 // Система рекламы
-function showAdAndActivateMultiplier() {
+async function showAdAndActivateMultiplier() {
   const now = Date.now();
   if (currentPlayer.adMultiplierActive || now < currentPlayer.adButtonCooldownEnd) {
     return;
   }
-  
-  if (typeof vkBridge !== 'undefined') {
-    vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' })
-      .then(data => {
-        if (data.result) {
-          activateAdMultiplier();
-        } else {
-          showMessage("Реклама не была показана");
-        }
-      })
-      .catch(error => {
-        console.error('Ошибка показа рекламы:', error);
-        showMessage("Ошибка при показе рекламы");
-      });
-  } else {
-    // Режим тестирования без VK Bridge
-    if (confirm('В реальном приложении здесь будет реклама. Активировать множитель?')) {
-      activateAdMultiplier();
+
+  try {
+    showMessage("Загрузка рекламы...");
+    
+    if (typeof vkBridge !== 'undefined') {
+      // Проверяем доступность рекламы
+      const checkResult = await vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
+      if (!checkResult.result || !checkResult.result.is_available) {
+        throw new Error('Реклама недоступна');
+      }
+      
+      // Показываем рекламу
+      const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
+      if (!adResult.result) {
+        throw new Error('Показ рекламы не удался');
+      }
+    } else {
+      // Тестовый режим - запрашиваем подтверждение
+      if (!confirm('В реальном приложении здесь будет реклама. Активировать множитель?')) {
+        return;
+      }
     }
+    
+    // Активируем множитель после успешного показа рекламы
+    activateAdMultiplier();
+  } catch (error) {
+    console.error('Ошибка показа рекламы:', error);
+    showMessage("Не удалось показать рекламу");
   }
 }
 
@@ -275,6 +301,15 @@ function endAdMultiplier() {
   updateUI();
   savePlayerData();
   showMessage("Действие множителя закончилось");
+}
+
+function startAdMultiplierCheck() {
+  setInterval(() => {
+    if (currentPlayer.adMultiplierActive && Date.now() >= currentPlayer.adMultiplierEndTime) {
+      endAdMultiplier();
+    }
+    updateAdButton();
+  }, 1000);
 }
 
 // Интерфейс
@@ -474,7 +509,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.buyClickUpgrade = buyClickUpgrade;
   window.buyAutoClickUpgrade = buyAutoClickUpgrade;
   
-  initApp();
+  // Инициализация приложения
+  initVKBridge();
 });
 
 // Тестовая база данных игроков
