@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta property="vk:app_id" content="YOUR_APP_ID">
     <title>Кликер | VK Mini App</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
-    <script src="mock-vk-bridge.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -25,7 +25,31 @@
         </div>
         
         <div class="tab-content" id="upgrades">
-            <!-- Содержимое генерируется скриптом -->
+            <div class="upgrades-tab">
+                <div class="upgrades-section">
+                    <h3><i class="icon">👆</i> Улучшения клика</h3>
+                    <div id="clickUpgrades" class="upgrades-container"></div>
+                </div>
+                
+                <div class="upgrades-section">
+                    <h3><i class="icon">⛏️</i> Автомайнинг</h3>
+                    <div id="autoClickUpgrades" class="upgrades-container"></div>
+                </div>
+                
+                <div class="stats-section">
+                    <h3>Ваши характеристики</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalClickValueStat">0.000000</div>
+                            <div class="stat-name">За клик</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalAutoClickValueStat">0.000000</div>
+                            <div class="stat-name">В секунду</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="tab-content" id="top">
@@ -34,13 +58,13 @@
         </div>
         
         <div class="tab-bar">
-            <button class="tab-button" data-tab="upgrades" id="upgradesTabButton">
+            <button class="tab-button" data-tab="upgrades">
                 Прокачка
             </button>
-            <button class="tab-button active" data-tab="clicker" id="clickerTabButton">
+            <button class="tab-button active" data-tab="clicker">
                 Кликер
             </button>
-            <button class="tab-button" data-tab="top" id="topTabButton">
+            <button class="tab-button" data-tab="top">
                 Топ игроков
             </button>
         </div>
