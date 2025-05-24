@@ -1,6 +1,6 @@
 // Конфигурация приложения
 const config = {
-  initialClickValue: 0.000001,
+  initialClickValue: 0.001,
   clickUpgrades: [
     {
       name: "Улучшенный палец",
@@ -8,7 +8,7 @@ const config = {
       levels: 10,
       baseCost: 10,
       costMultiplier: 1.5,
-      baseValue: 0.000002,
+      baseValue: 0.002,
       valueMultiplier: 1.2,
       icon: "👆"
     },
@@ -18,7 +18,7 @@ const config = {
       levels: 5,
       baseCost: 100,
       costMultiplier: 2,
-      baseValue: 0.00001,
+      baseValue: 0.01,
       valueMultiplier: 1.5,
       icon: "👉",
       requires: { upgradeIndex: 0, minLevel: 5 }
@@ -31,7 +31,7 @@ const config = {
       levels: 10,
       baseCost: 50,
       costMultiplier: 1.8,
-      baseValue: 0.00001,
+      baseValue: 0.01,
       valueMultiplier: 1.3,
       icon: "⛏️"
     },
@@ -41,7 +41,7 @@ const config = {
       levels: 5,
       baseCost: 500,
       costMultiplier: 2.2,
-      baseValue: 0.0001,
+      baseValue: 0.1,
       valueMultiplier: 1.7,
       icon: "⚒️",
       requires: { upgradeIndex: 0, minLevel: 5 }
