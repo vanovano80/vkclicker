@@ -48,9 +48,9 @@ const config = {
     }
   ],
   adMultiplier: 2,
-  adDuration: 30000,    // 30 секунд действия
-  adCooldown: 60000,    // 1 минута кулдауна
-  adRetryDelay: 30000   // 30 секунд между попытками
+  adDuration: 30000,    // 30 секунд
+  adCooldown: 60000,    // 1 минута
+  adRetryDelay: 30000   // 30 секунд
 };
 
 // Данные игрока
@@ -66,9 +66,9 @@ let currentPlayer = {
   adMultiplierActive: false,
   adMultiplierEndTime: 0,
   adButtonCooldownEnd: 0,
-  lastAdAttemptTime: 0,
   autoClickInterval: null,
-  adCheckAttempts: 0
+  adReady: false,       // Флаг готовности рекламы
+  lastAdCheckTime: 0    // Время последней проверки рекламы
 };
 
 // Инициализация VK Bridge
@@ -83,6 +83,7 @@ function initVKBridge() {
         currentPlayer.id = user.id;
         currentPlayer.name = `${user.first_name} ${user.last_name}`;
         loadPlayerData();
+        initAdSystem(); // Инициализация рекламной системы
         startAdMultiplierCheck();
       })
       .catch(error => {
@@ -99,11 +100,49 @@ function initVKBridge() {
 function initTestMode() {
   currentPlayer.id = 999;
   currentPlayer.name = "Тестовый режим";
+  currentPlayer.adReady = true; // В тестовом режиме реклама всегда доступна
   loadPlayerData();
   startAdMultiplierCheck();
 }
 
-// Загрузка данных игрока
+// Инициализация рекламной системы
+async function initAdSystem() {
+  const now = Date.now();
+  
+  // Не проверяем слишком часто (не чаще чем раз в 10 секунд)
+  if (now - currentPlayer.lastAdCheckTime < 10000) {
+    return;
+  }
+  
+  currentPlayer.lastAdCheckTime = now;
+  
+  try {
+    if (typeof vkBridge === 'undefined') {
+      currentPlayer.adReady = true;
+      return;
+    }
+
+    const checkResult = await vkBridge.send('VKWebAppCheckNativeAds', { 
+      ad_format: 'reward' 
+    });
+    
+    currentPlayer.adReady = checkResult.result;
+    
+    if (!currentPlayer.adReady) {
+      console.log('Рекламные материалы не найдены');
+      // Не показываем сообщение пользователю, чтобы не раздражать
+    }
+    
+    updateAdButton(); // Обновляем состояние кнопки
+    
+  } catch (error) {
+    console.error('Ошибка проверки рекламы:', error);
+    currentPlayer.adReady = false;
+    updateAdButton();
+  }
+}
+
+// Загрузка и сохранение данных (без изменений)
 function loadPlayerData() {
   const savedData = localStorage.getItem('clickerData');
   if (savedData) {
@@ -127,12 +166,11 @@ function loadPlayerData() {
   updateUI();
 }
 
-// Сохранение данных игрока
 function savePlayerData() {
   localStorage.setItem('clickerData', JSON.stringify(currentPlayer));
 }
 
-// Основные функции игры
+// Основные функции игры (без изменений)
 function handleClick() {
   currentPlayer.score += currentPlayer.totalClickValue;
   updateCounter();
@@ -182,7 +220,7 @@ function calculateTotalAutoClickValue() {
   currentPlayer.totalAutoClickValue = total;
 }
 
-// Система прокачки
+// Система прокачки (без изменений)
 function buyClickUpgrade(upgradeIndex) {
   const upgrade = config.clickUpgrades[upgradeIndex];
   const playerUpgrade = currentPlayer.clickUpgrades[upgradeIndex];
@@ -264,42 +302,28 @@ async function showAdAndActivateMultiplier() {
     showMessage(`Попробуйте через ${timeLeft} сек`);
     return;
   }
-  
-  // Проверка количества попыток
-  if (currentPlayer.adCheckAttempts >= 3) {
-    showMessage("Слишком много попыток. Подождите");
-    currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay * 2;
-    updateAdButton();
+
+  // Тестовый режим
+  if (typeof vkBridge === 'undefined') {
+    if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
+      activateAdMultiplier();
+    }
     return;
   }
 
-  currentPlayer.lastAdAttemptTime = now;
-  currentPlayer.adCheckAttempts++;
-  updateAdButton();
-  
-  try {
-    showMessage("Загружаем рекламу...");
+  // Проверка готовности рекламы
+  if (!currentPlayer.adReady) {
+    showMessage("Идет загрузка рекламы...");
+    await initAdSystem(); // Пробуем загрузить рекламу
     
-    // Тестовый режим
-    if (typeof vkBridge === 'undefined') {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
-        activateAdMultiplier();
-        currentPlayer.adCheckAttempts = 0;
-      } else {
-        throw new Error("Отменено пользователем");
-      }
+    if (!currentPlayer.adReady) {
+      showMessage("Реклама не загружена. Попробуйте позже");
       return;
     }
-    
-    // Проверка доступности рекламы
-    const available = await vkBridge.send('VKWebAppCheckNativeAds', { 
-      ad_format: 'reward' 
-    });
-    
-    if (!available.result || !available.result.is_available) {
-      throw new Error("Реклама временно недоступна. Попробуйте позже");
-    }
+  }
+
+  try {
+    showMessage("Загружаем рекламу...");
     
     // Показ рекламы
     const result = await vkBridge.send('VKWebAppShowNativeAds', {
@@ -312,13 +336,14 @@ async function showAdAndActivateMultiplier() {
     
     // Успешный показ
     activateAdMultiplier();
-    currentPlayer.adCheckAttempts = 0;
+    
+    // Перезагружаем рекламу для следующего показа
+    setTimeout(initAdSystem, 1000);
     
   } catch (error) {
-    console.error("Ошибка рекламы:", error);
-    showMessage(error.message || "Ошибка загрузки рекламы");
-    
-    // Устанавливаем задержку перед следующей попыткой
+    console.error("Ошибка показа рекламы:", error);
+    showMessage("Ошибка загрузки рекламы");
+    currentPlayer.adReady = false;
     currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay;
     updateAdButton();
   }
@@ -338,7 +363,7 @@ function activateAdMultiplier() {
     endAdMultiplier();
   }, config.adDuration);
   
-  showMessage(`Множитель x${config.adMultiplier} активирован на ${config.adDuration/1000} сек!`);
+  showMessage(`Множитель x${config.adMultiplier} активирован!`);
 }
 
 function endAdMultiplier() {
@@ -399,11 +424,12 @@ function updateAdButton() {
   } 
   else {
     adButton.textContent = `Умножить x${config.adMultiplier} (Реклама)`;
-    adButton.disabled = false;
+    adButton.disabled = !currentPlayer.adReady;
     adButton.classList.remove('active');
   }
 }
 
+// Остальные функции интерфейса (без изменений)
 function renderUpgrades() {
   const clickUpgradesContainer = document.getElementById('clickUpgrades');
   const autoClickUpgradesContainer = document.getElementById('autoClickUpgrades');
@@ -564,7 +590,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Назначение обработчиков
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
-  document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
   
   document.querySelectorAll('.tab-button').forEach(button => {
     button.addEventListener('click', () => {
@@ -582,5 +607,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Тестовая база данных игроков
 const playersDB = [
- 
+
 ];
