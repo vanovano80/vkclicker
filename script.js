@@ -48,9 +48,9 @@ const config = {
     }
   ],
   adMultiplier: 2,
-  adDuration: 60000,    // 1 минута
-  adCooldown: 180000,   // 3 минуты
-  adRetryDelay: 30000   // 30 секунд между попытками
+  adDuration: 30000,    // 30 секунд
+  adCooldown: 60000,    // 1 минута
+  adRetryDelay: 10000   // 10 секунд
 };
 
 // Данные игрока
@@ -67,7 +67,8 @@ let currentPlayer = {
   adMultiplierEndTime: 0,
   adButtonCooldownEnd: 0,
   lastAdAttemptTime: 0,
-  autoClickInterval: null
+  autoClickInterval: null,
+  adCheckAttempts: 0
 };
 
 // Инициализация VK Bridge
@@ -251,42 +252,63 @@ function buyAutoClickUpgrade(upgradeIndex) {
 async function showAdAndActivateMultiplier() {
   const now = Date.now();
   
-  if (currentPlayer.adMultiplierActive || now < currentPlayer.adButtonCooldownEnd) {
+  if (currentPlayer.adMultiplierActive) {
+    showMessage("Множитель уже активен");
     return;
   }
   
-  if (now - currentPlayer.lastAdAttemptTime < config.adRetryDelay) {
-    showMessage("Пожалуйста, подождите перед повторной попыткой");
+  if (now < currentPlayer.adButtonCooldownEnd) {
+    const timeLeft = Math.ceil((currentPlayer.adButtonCooldownEnd - now)/1000);
+    showMessage(`Попробуйте через ${timeLeft} сек`);
     return;
   }
   
+  if (currentPlayer.adCheckAttempts > 2) {
+    showMessage("Слишком много попыток. Подождите");
+    currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay * 2;
+    updateAdButton();
+    return;
+  }
+
   currentPlayer.lastAdAttemptTime = now;
+  currentPlayer.adCheckAttempts++;
   updateAdButton();
   
   try {
-    showMessage("Загрузка рекламы...");
+    showMessage("Загружаем рекламу...");
     
-    if (typeof vkBridge !== 'undefined') {
-      const checkResult = await vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
-      if (!checkResult.result || !checkResult.result.is_available) {
-        throw new Error("Реклама временно недоступна. Попробуйте позже.");
+    if (typeof vkBridge === 'undefined') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
+        activateAdMultiplier();
+        return;
       }
-      
-      const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
-      if (!adResult.result || adResult.result.status === 'closed') {
-        throw new Error("Реклама не была показана полностью");
-      }
-    } else {
-      const userConfirmed = confirm('В реальном приложении здесь будет реклама. Активировать множитель?');
-      if (!userConfirmed) {
-        throw new Error("Пользователь отменил действие");
-      }
+      throw new Error("Отменено пользователем");
+    }
+    
+    const available = await vkBridge.send('VKWebAppCheckNativeAds', { 
+      ad_format: 'reward' 
+    });
+    
+    if (!available.result || !available.result.is_available) {
+      throw new Error("Реклама не доступна. Попробуйте позже");
+    }
+    
+    const result = await vkBridge.send('VKWebAppShowNativeAds', {
+      ad_format: 'reward'
+    });
+    
+    if (!result.result) {
+      throw new Error("Не удалось показать рекламу");
     }
     
     activateAdMultiplier();
+    currentPlayer.adCheckAttempts = 0;
+    
   } catch (error) {
-    console.error('Ошибка рекламы:', error);
-    showMessage(error.message || "Не удалось загрузить рекламу");
+    console.error("Ошибка рекламы:", error);
+    showMessage(error.message || "Ошибка загрузки");
+    
     currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay;
     updateAdButton();
   }
@@ -306,7 +328,7 @@ function activateAdMultiplier() {
     endAdMultiplier();
   }, config.adDuration);
   
-  showMessage("Множитель кликов x2 активирован!");
+  showMessage(`Множитель x${config.adMultiplier} активирован!`);
 }
 
 function endAdMultiplier() {
@@ -350,21 +372,23 @@ function updateAdButton() {
     if (seconds < 60) return `${seconds}с`;
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}м ${secs < 10 ? '0' : ''}${secs}с`;
+    return `${mins}м ${secs.toString().padStart(2, '0')}с`;
   }
   
   if (currentPlayer.adMultiplierActive) {
-    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adMultiplierEndTime - now) / 1000));
+    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adMultiplierEndTime - now)/1000));
     adButton.textContent = `Активно (${formatTime(timeLeft)})`;
     adButton.disabled = true;
     adButton.classList.add('active');
-  } else if (now < currentPlayer.adButtonCooldownEnd) {
-    const cooldownLeft = Math.max(0, Math.ceil((currentPlayer.adButtonCooldownEnd - now) / 1000));
-    adButton.textContent = `Доступно через ${formatTime(cooldownLeft)}`;
+  } 
+  else if (now < currentPlayer.adButtonCooldownEnd) {
+    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adButtonCooldownEnd - now)/1000));
+    adButton.textContent = `Доступно через ${formatTime(timeLeft)}`;
     adButton.disabled = true;
     adButton.classList.remove('active');
-  } else {
-    adButton.textContent = "Умножить клики х2 (Реклама)";
+  } 
+  else {
+    adButton.textContent = `Умножить x${config.adMultiplier} (Реклама)`;
     adButton.disabled = false;
     adButton.classList.remove('active');
   }
@@ -516,18 +540,6 @@ function switchTab(tabName) {
 
 // Инициализация при загрузке
 document.addEventListener('DOMContentLoaded', () => {
-  // Проверка AdBlock
-  window.adblockDetected = false;
-  const adCheck = document.createElement('div');
-  adCheck.innerHTML = '&nbsp;';
-  adCheck.className = 'ad-box';
-  document.body.appendChild(adCheck);
-  setTimeout(() => {
-    window.adblockDetected = adCheck.offsetHeight === 0;
-    document.body.removeChild(adCheck);
-  }, 100);
-
-  // Назначение обработчиков
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
   document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
   
@@ -537,11 +549,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   
-  // Глобальные функции для вызова из HTML
   window.buyClickUpgrade = buyClickUpgrade;
   window.buyAutoClickUpgrade = buyAutoClickUpgrade;
   
-  // Инициализация приложения
   initVKBridge();
 });
 
