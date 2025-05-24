@@ -48,9 +48,9 @@ const config = {
     }
   ],
   adMultiplier: 2,
-  adDuration: 30000,    // 30 секунд
-  adCooldown: 60000,    // 1 минута
-  adRetryDelay: 10000   // 10 секунд
+  adDuration: 30000,    // 30 секунд действия
+  adCooldown: 60000,    // 1 минута кулдауна
+  adRetryDelay: 30000   // 30 секунд между попытками
 };
 
 // Данные игрока
@@ -252,18 +252,21 @@ function buyAutoClickUpgrade(upgradeIndex) {
 async function showAdAndActivateMultiplier() {
   const now = Date.now();
   
+  // Проверка активного множителя
   if (currentPlayer.adMultiplierActive) {
     showMessage("Множитель уже активен");
     return;
   }
   
+  // Проверка кулдауна
   if (now < currentPlayer.adButtonCooldownEnd) {
     const timeLeft = Math.ceil((currentPlayer.adButtonCooldownEnd - now)/1000);
     showMessage(`Попробуйте через ${timeLeft} сек`);
     return;
   }
   
-  if (currentPlayer.adCheckAttempts > 2) {
+  // Проверка количества попыток
+  if (currentPlayer.adCheckAttempts >= 3) {
     showMessage("Слишком много попыток. Подождите");
     currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay * 2;
     updateAdButton();
@@ -277,23 +280,28 @@ async function showAdAndActivateMultiplier() {
   try {
     showMessage("Загружаем рекламу...");
     
+    // Тестовый режим
     if (typeof vkBridge === 'undefined') {
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
         activateAdMultiplier();
-        return;
+        currentPlayer.adCheckAttempts = 0;
+      } else {
+        throw new Error("Отменено пользователем");
       }
-      throw new Error("Отменено пользователем");
+      return;
     }
     
+    // Проверка доступности рекламы
     const available = await vkBridge.send('VKWebAppCheckNativeAds', { 
       ad_format: 'reward' 
     });
     
     if (!available.result || !available.result.is_available) {
-      throw new Error("Реклама не доступна. Попробуйте позже");
+      throw new Error("Реклама временно недоступна. Попробуйте позже");
     }
     
+    // Показ рекламы
     const result = await vkBridge.send('VKWebAppShowNativeAds', {
       ad_format: 'reward'
     });
@@ -302,13 +310,15 @@ async function showAdAndActivateMultiplier() {
       throw new Error("Не удалось показать рекламу");
     }
     
+    // Успешный показ
     activateAdMultiplier();
     currentPlayer.adCheckAttempts = 0;
     
   } catch (error) {
     console.error("Ошибка рекламы:", error);
-    showMessage(error.message || "Ошибка загрузки");
+    showMessage(error.message || "Ошибка загрузки рекламы");
     
+    // Устанавливаем задержку перед следующей попыткой
     currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay;
     updateAdButton();
   }
@@ -328,7 +338,7 @@ function activateAdMultiplier() {
     endAdMultiplier();
   }, config.adDuration);
   
-  showMessage(`Множитель x${config.adMultiplier} активирован!`);
+  showMessage(`Множитель x${config.adMultiplier} активирован на ${config.adDuration/1000} сек!`);
 }
 
 function endAdMultiplier() {
@@ -540,6 +550,19 @@ function switchTab(tabName) {
 
 // Инициализация при загрузке
 document.addEventListener('DOMContentLoaded', () => {
+  // Проверка AdBlock
+  const adCheck = document.createElement('div');
+  adCheck.innerHTML = '&nbsp;';
+  adCheck.className = 'ad';
+  document.body.appendChild(adCheck);
+  setTimeout(() => {
+    if (adCheck.offsetHeight === 0) {
+      showMessage("Для корректной работы отключите AdBlock");
+    }
+    document.body.removeChild(adCheck);
+  }, 100);
+
+  // Назначение обработчиков
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
   document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
   
@@ -549,15 +572,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   
+  // Глобальные функции
   window.buyClickUpgrade = buyClickUpgrade;
   window.buyAutoClickUpgrade = buyAutoClickUpgrade;
   
+  // Инициализация
   initVKBridge();
 });
 
 // Тестовая база данных игроков
 const playersDB = [
-  { id: 1, name: "Игрок 1", score: 100.123456 },
-  { id: 2, name: "Игрок 2", score: 90.654321 },
-  { id: 3, name: "Игрок 3", score: 80.987654 }
+ 
 ];
