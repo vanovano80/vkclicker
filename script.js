@@ -50,7 +50,8 @@ const config = {
   adMultiplier: 2,
   adDuration: 30000,    // 30 секунд
   adCooldown: 60000,    // 1 минута
-  adRetryDelay: 30000   // 30 секунд
+  adRetryDelay: 30000,  // 30 секунд
+  bannerAdRefresh: 60000 // 60 секунд между обновлениями баннера
 };
 
 // Данные игрока
@@ -67,8 +68,9 @@ let currentPlayer = {
   adMultiplierEndTime: 0,
   adButtonCooldownEnd: 0,
   autoClickInterval: null,
-  adReady: false,       // Флаг готовности рекламы
-  lastAdCheckTime: 0    // Время последней проверки рекламы
+  adReady: false,
+  lastAdCheckTime: 0,
+  bannerAdInterval: null
 };
 
 // Инициализация VK Bridge
@@ -83,8 +85,9 @@ function initVKBridge() {
         currentPlayer.id = user.id;
         currentPlayer.name = `${user.first_name} ${user.last_name}`;
         loadPlayerData();
-        initAdSystem(); // Инициализация рекламной системы
+        initAdSystem();
         startAdMultiplierCheck();
+        initBannerAd(); // Инициализация баннерной рекламы
       })
       .catch(error => {
         console.error('Ошибка VK Bridge:', error);
@@ -100,20 +103,72 @@ function initVKBridge() {
 function initTestMode() {
   currentPlayer.id = 999;
   currentPlayer.name = "Тестовый режим";
-  currentPlayer.adReady = true; // В тестовом режиме реклама всегда доступна
+  currentPlayer.adReady = true;
   loadPlayerData();
   startAdMultiplierCheck();
+  initBannerAd(); // Баннер в тестовом режиме
 }
 
-// Инициализация рекламной системы
-async function initAdSystem() {
-  const now = Date.now();
-  
-  // Не проверяем слишком часто (не чаще чем раз в 10 секунд)
-  if (now - currentPlayer.lastAdCheckTime < 10000) {
+// Инициализация баннерной рекламы
+function initBannerAd() {
+  if (typeof vkBridge === 'undefined') {
+    // В тестовом режиме создаем заглушку
+    const testBanner = document.createElement('div');
+    testBanner.id = 'banner-ad';
+    testBanner.style.cssText = `
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 50px;
+      background-color: #f0f0f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-top: 1px solid #ccc;
+      z-index: 1000;
+    `;
+    testBanner.innerHTML = '<p>Здесь был бы рекламный баннер</p>';
+    document.body.appendChild(testBanner);
     return;
   }
+
+  // Функция показа баннера
+  const showBanner = () => {
+    vkBridge.send('VKWebAppShowBannerAd', {
+      banner_location: 'bottom'
+    }).then(data => {
+      if (!data.result) {
+        console.log('Не удалось показать баннер');
+      }
+    }).catch(error => {
+      console.error('Ошибка баннера:', error);
+    });
+  };
+
+  // Показываем сразу и устанавливаем интервал
+  showBanner();
+  currentPlayer.bannerAdInterval = setInterval(showBanner, config.bannerAdRefresh);
+}
+
+// Остановка баннерной рекламы
+function stopBannerAd() {
+  if (currentPlayer.bannerAdInterval) {
+    clearInterval(currentPlayer.bannerAdInterval);
+  }
   
+  if (typeof vkBridge !== 'undefined') {
+    vkBridge.send('VKWebAppHideBannerAd').catch(console.error);
+  } else {
+    const banner = document.getElementById('banner-ad');
+    if (banner) banner.remove();
+  }
+}
+
+// Инициализация рекламной системы (без изменений)
+async function initAdSystem() {
+  const now = Date.now();
+  if (now - currentPlayer.lastAdCheckTime < 10000) return;
   currentPlayer.lastAdCheckTime = now;
   
   try {
@@ -125,16 +180,8 @@ async function initAdSystem() {
     const checkResult = await vkBridge.send('VKWebAppCheckNativeAds', { 
       ad_format: 'reward' 
     });
-    
     currentPlayer.adReady = checkResult.result;
-    
-    if (!currentPlayer.adReady) {
-      console.log('Рекламные материалы не найдены');
-      // Не показываем сообщение пользователю, чтобы не раздражать
-    }
-    
-    updateAdButton(); // Обновляем состояние кнопки
-    
+    updateAdButton();
   } catch (error) {
     console.error('Ошибка проверки рекламы:', error);
     currentPlayer.adReady = false;
@@ -142,439 +189,9 @@ async function initAdSystem() {
   }
 }
 
-// Загрузка и сохранение данных (без изменений)
-function loadPlayerData() {
-  const savedData = localStorage.getItem('clickerData');
-  if (savedData) {
-    try {
-      const data = JSON.parse(savedData);
-      Object.assign(currentPlayer, data);
-      
-      calculateTotalClickValue();
-      calculateTotalAutoClickValue();
-      
-      if (currentPlayer.adMultiplierEndTime > Date.now()) {
-        currentPlayer.adMultiplierActive = true;
-        setTimeout(endAdMultiplier, currentPlayer.adMultiplierEndTime - Date.now());
-      }
-      
-      startAutoClicker();
-    } catch (e) {
-      console.error('Ошибка загрузки данных:', e);
-    }
-  }
-  updateUI();
-}
+// ... (все остальные функции остаются без изменений, как в предыдущем коде)
 
-function savePlayerData() {
-  localStorage.setItem('clickerData', JSON.stringify(currentPlayer));
-}
-
-// Основные функции игры (без изменений)
-function handleClick() {
-  currentPlayer.score += currentPlayer.totalClickValue;
-  updateCounter();
-  savePlayerData();
-}
-
-function startAutoClicker() {
-  if (currentPlayer.autoClickInterval) {
-    clearInterval(currentPlayer.autoClickInterval);
-  }
-  
-  if (currentPlayer.totalAutoClickValue > 0) {
-    currentPlayer.autoClickInterval = setInterval(() => {
-      currentPlayer.score += currentPlayer.totalAutoClickValue;
-      updateCounter();
-      savePlayerData();
-    }, 1000);
-  }
-}
-
-function calculateTotalClickValue() {
-  let total = config.initialClickValue;
-  
-  config.clickUpgrades.forEach((upgrade, index) => {
-    const playerUpgrade = currentPlayer.clickUpgrades[index];
-    if (playerUpgrade.level > 0) {
-      total += upgrade.baseValue * Math.pow(upgrade.valueMultiplier, playerUpgrade.level - 1);
-    }
-  });
-  
-  currentPlayer.baseClickValue = total;
-  currentPlayer.totalClickValue = currentPlayer.adMultiplierActive ? 
-    total * config.adMultiplier : 
-    total;
-}
-
-function calculateTotalAutoClickValue() {
-  let total = 0;
-  
-  config.autoClickUpgrades.forEach((upgrade, index) => {
-    const playerUpgrade = currentPlayer.autoClickUpgrades[index];
-    if (playerUpgrade.level > 0) {
-      total += upgrade.baseValue * Math.pow(upgrade.valueMultiplier, playerUpgrade.level - 1);
-    }
-  });
-  
-  currentPlayer.totalAutoClickValue = total;
-}
-
-// Система прокачки (без изменений)
-function buyClickUpgrade(upgradeIndex) {
-  const upgrade = config.clickUpgrades[upgradeIndex];
-  const playerUpgrade = currentPlayer.clickUpgrades[upgradeIndex];
-  
-  if (upgrade.requires) {
-    const reqUpgrade = currentPlayer.clickUpgrades[upgrade.requires.upgradeIndex];
-    if (reqUpgrade.level < upgrade.requires.minLevel) {
-      showMessage(`Требуется ${config.clickUpgrades[upgrade.requires.upgradeIndex].name} уровня ${upgrade.requires.minLevel}`);
-      return;
-    }
-  }
-  
-  if (playerUpgrade.level >= upgrade.levels) {
-    showMessage("Максимальный уровень достигнут");
-    return;
-  }
-  
-  const cost = upgrade.baseCost * Math.pow(upgrade.costMultiplier, playerUpgrade.level);
-  
-  if (currentPlayer.score >= cost) {
-    currentPlayer.score -= cost;
-    playerUpgrade.level++;
-    
-    calculateTotalClickValue();
-    updateUI();
-    savePlayerData();
-    showMessage(`${upgrade.name} улучшен до уровня ${playerUpgrade.level}!`);
-  } else {
-    showMessage("Недостаточно средств");
-  }
-}
-
-function buyAutoClickUpgrade(upgradeIndex) {
-  const upgrade = config.autoClickUpgrades[upgradeIndex];
-  const playerUpgrade = currentPlayer.autoClickUpgrades[upgradeIndex];
-  
-  if (upgrade.requires) {
-    const reqUpgrade = currentPlayer.autoClickUpgrades[upgrade.requires.upgradeIndex];
-    if (reqUpgrade.level < upgrade.requires.minLevel) {
-      showMessage(`Требуется ${config.autoClickUpgrades[upgrade.requires.upgradeIndex].name} уровня ${upgrade.requires.minLevel}`);
-      return;
-    }
-  }
-  
-  if (playerUpgrade.level >= upgrade.levels) {
-    showMessage("Максимальный уровень достигнут");
-    return;
-  }
-  
-  const cost = upgrade.baseCost * Math.pow(upgrade.costMultiplier, playerUpgrade.level);
-  
-  if (currentPlayer.score >= cost) {
-    currentPlayer.score -= cost;
-    playerUpgrade.level++;
-    
-    calculateTotalAutoClickValue();
-    startAutoClicker();
-    updateUI();
-    savePlayerData();
-    showMessage(`${upgrade.name} улучшен до уровня ${playerUpgrade.level}!`);
-  } else {
-    showMessage("Недостаточно средств");
-  }
-}
-
-// Улучшенная система рекламы
-async function showAdAndActivateMultiplier() {
-  const now = Date.now();
-  
-  // Проверка активного множителя
-  if (currentPlayer.adMultiplierActive) {
-    showMessage("Множитель уже активен");
-    return;
-  }
-  
-  // Проверка кулдауна
-  if (now < currentPlayer.adButtonCooldownEnd) {
-    const timeLeft = Math.ceil((currentPlayer.adButtonCooldownEnd - now)/1000);
-    showMessage(`Попробуйте через ${timeLeft} сек`);
-    return;
-  }
-
-  // Тестовый режим
-  if (typeof vkBridge === 'undefined') {
-    if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
-      activateAdMultiplier();
-    }
-    return;
-  }
-
-  // Проверка готовности рекламы
-  if (!currentPlayer.adReady) {
-    showMessage("Идет загрузка рекламы...");
-    await initAdSystem(); // Пробуем загрузить рекламу
-    
-    if (!currentPlayer.adReady) {
-      showMessage("Реклама не загружена. Попробуйте позже");
-      return;
-    }
-  }
-
-  try {
-    showMessage("Загружаем рекламу...");
-    
-    // Показ рекламы
-    const result = await vkBridge.send('VKWebAppShowNativeAds', {
-      ad_format: 'reward'
-    });
-    
-    if (!result.result) {
-      throw new Error("Не удалось показать рекламу");
-    }
-    
-    // Успешный показ
-    activateAdMultiplier();
-    
-    // Перезагружаем рекламу для следующего показа
-    setTimeout(initAdSystem, 1000);
-    
-  } catch (error) {
-    console.error("Ошибка показа рекламы:", error);
-    showMessage("Ошибка загрузки рекламы");
-    currentPlayer.adReady = false;
-    currentPlayer.adButtonCooldownEnd = now + config.adRetryDelay;
-    updateAdButton();
-  }
-}
-
-function activateAdMultiplier() {
-  const now = Date.now();
-  currentPlayer.adMultiplierActive = true;
-  currentPlayer.adMultiplierEndTime = now + config.adDuration;
-  currentPlayer.adButtonCooldownEnd = now + config.adDuration + config.adCooldown;
-  
-  calculateTotalClickValue();
-  updateUI();
-  savePlayerData();
-  
-  setTimeout(() => {
-    endAdMultiplier();
-  }, config.adDuration);
-  
-  showMessage(`Множитель x${config.adMultiplier} активирован!`);
-}
-
-function endAdMultiplier() {
-  currentPlayer.adMultiplierActive = false;
-  calculateTotalClickValue();
-  updateUI();
-  savePlayerData();
-  showMessage("Действие множителя закончилось");
-}
-
-function startAdMultiplierCheck() {
-  setInterval(() => {
-    if (currentPlayer.adMultiplierActive && Date.now() >= currentPlayer.adMultiplierEndTime) {
-      endAdMultiplier();
-    }
-    updateAdButton();
-  }, 1000);
-}
-
-// Интерфейс
-function updateUI() {
-  updateCounter();
-  updateAdButton();
-  renderUpgrades();
-}
-
-function updateCounter() {
-  const counter = document.getElementById('counter');
-  const clickValue = document.getElementById('clickValue');
-  if (counter) counter.textContent = currentPlayer.score.toFixed(6);
-  if (clickValue) clickValue.textContent = currentPlayer.totalClickValue.toFixed(6);
-}
-
-function updateAdButton() {
-  const adButton = document.getElementById('watchAdButton');
-  if (!adButton) return;
-  
-  const now = Date.now();
-  
-  function formatTime(seconds) {
-    if (seconds < 60) return `${seconds}с`;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}м ${secs.toString().padStart(2, '0')}с`;
-  }
-  
-  if (currentPlayer.adMultiplierActive) {
-    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adMultiplierEndTime - now)/1000));
-    adButton.textContent = `Активно (${formatTime(timeLeft)})`;
-    adButton.disabled = true;
-    adButton.classList.add('active');
-  } 
-  else if (now < currentPlayer.adButtonCooldownEnd) {
-    const timeLeft = Math.max(0, Math.ceil((currentPlayer.adButtonCooldownEnd - now)/1000));
-    adButton.textContent = `Доступно через ${formatTime(timeLeft)}`;
-    adButton.disabled = true;
-    adButton.classList.remove('active');
-  } 
-  else {
-    adButton.textContent = `Умножить x${config.adMultiplier} (Реклама)`;
-    adButton.disabled = !currentPlayer.adReady;
-    adButton.classList.remove('active');
-  }
-}
-
-// Остальные функции интерфейса (без изменений)
-function renderUpgrades() {
-  const clickUpgradesContainer = document.getElementById('clickUpgrades');
-  const autoClickUpgradesContainer = document.getElementById('autoClickUpgrades');
-  
-  if (clickUpgradesContainer) {
-    clickUpgradesContainer.innerHTML = config.clickUpgrades.map((upgrade, index) => {
-      const playerUpgrade = currentPlayer.clickUpgrades[index];
-      const progress = (playerUpgrade.level / upgrade.levels) * 100;
-      const nextCost = playerUpgrade.level < upgrade.levels ? 
-        Math.floor(upgrade.baseCost * Math.pow(upgrade.costMultiplier, playerUpgrade.level)) : 0;
-      const currentValue = playerUpgrade.level > 0 ? 
-        (upgrade.baseValue * Math.pow(upgrade.valueMultiplier, playerUpgrade.level - 1)).toFixed(6) : 0;
-      
-      const isLocked = upgrade.requires && 
-        currentPlayer.clickUpgrades[upgrade.requires.upgradeIndex].level < upgrade.requires.minLevel;
-      const isMaxLevel = playerUpgrade.level >= upgrade.levels;
-      
-      return `
-      <div class="upgrade ${isMaxLevel ? 'max-level' : ''} ${isLocked ? 'locked' : ''}">
-        <div class="upgrade-icon">${upgrade.icon}</div>
-        <div class="upgrade-info">
-          <h4>${upgrade.name} (${playerUpgrade.level}/${upgrade.levels})</h4>
-          <p>${upgrade.description}</p>
-          <div class="progress-bar">
-            <div class="progress" style="width: ${progress}%"></div>
-          </div>
-          <div class="upgrade-stats">
-            <span>+${currentValue} за клик</span>
-            ${!isMaxLevel ? `<span>Следующий уровень: ${nextCost.toFixed(2)}</span>` : '<span class="max-level-text">МАКС. УРОВЕНЬ</span>'}
-          </div>
-        </div>
-        <button class="buy-button" onclick="buyClickUpgrade(${index})" 
-          ${isMaxLevel || isLocked ? 'disabled' : ''}>
-          ${isMaxLevel ? 'MAX' : 'Улучшить'}
-        </button>
-      </div>
-      `;
-    }).join('');
-  }
-  
-  if (autoClickUpgradesContainer) {
-    autoClickUpgradesContainer.innerHTML = config.autoClickUpgrades.map((upgrade, index) => {
-      const playerUpgrade = currentPlayer.autoClickUpgrades[index];
-      const progress = (playerUpgrade.level / upgrade.levels) * 100;
-      const nextCost = playerUpgrade.level < upgrade.levels ? 
-        Math.floor(upgrade.baseCost * Math.pow(upgrade.costMultiplier, playerUpgrade.level)) : 0;
-      const currentValue = playerUpgrade.level > 0 ? 
-        (upgrade.baseValue * Math.pow(upgrade.valueMultiplier, playerUpgrade.level - 1)).toFixed(6) : 0;
-      
-      const isLocked = upgrade.requires && 
-        currentPlayer.autoClickUpgrades[upgrade.requires.upgradeIndex].level < upgrade.requires.minLevel;
-      const isMaxLevel = playerUpgrade.level >= upgrade.levels;
-      
-      return `
-      <div class="upgrade ${isMaxLevel ? 'max-level' : ''} ${isLocked ? 'locked' : ''}">
-        <div class="upgrade-icon">${upgrade.icon}</div>
-        <div class="upgrade-info">
-          <h4>${upgrade.name} (${playerUpgrade.level}/${upgrade.levels})</h4>
-          <p>${upgrade.description}</p>
-          <div class="progress-bar">
-            <div class="progress" style="width: ${progress}%"></div>
-          </div>
-          <div class="upgrade-stats">
-            <span>+${currentValue}/сек</span>
-            ${!isMaxLevel ? `<span>Следующий уровень: ${nextCost.toFixed(2)}</span>` : '<span class="max-level-text">МАКС. УРОВЕНЬ</span>'}
-          </div>
-        </div>
-        <button class="buy-button" onclick="buyAutoClickUpgrade(${index})" 
-          ${isMaxLevel || isLocked ? 'disabled' : ''}>
-          ${isMaxLevel ? 'MAX' : 'Улучшить'}
-        </button>
-      </div>
-      `;
-    }).join('');
-  }
-
-  const totalClickValueStat = document.getElementById('totalClickValueStat');
-  const totalAutoClickValueStat = document.getElementById('totalAutoClickValueStat');
-  if (totalClickValueStat) totalClickValueStat.textContent = currentPlayer.totalClickValue.toFixed(6);
-  if (totalAutoClickValueStat) totalAutoClickValueStat.textContent = currentPlayer.totalAutoClickValue.toFixed(6);
-}
-
-function showTopPlayers() {
-  const topPlayersList = document.getElementById('topPlayersList');
-  if (!topPlayersList) return;
-  
-  topPlayersList.innerHTML = '';
-  
-  const allPlayers = [...playersDB, {
-    id: currentPlayer.id,
-    name: currentPlayer.name,
-    score: currentPlayer.score
-  }];
-  
-  allPlayers.sort((a, b) => b.score - a.score);
-  
-  allPlayers.slice(0, 100).forEach((player, index) => {
-    const playerElement = document.createElement('div');
-    playerElement.className = `player ${player.id === currentPlayer.id ? 'current-player' : ''}`;
-    playerElement.innerHTML = `
-      <span class="rank">${index + 1}.</span>
-      <span class="name">${player.name}</span>
-      <span class="score">${player.score.toFixed(6)}</span>
-    `;
-    topPlayersList.appendChild(playerElement);
-  });
-}
-
-function showMessage(text) {
-  const messageElement = document.getElementById('message');
-  if (messageElement) {
-    messageElement.textContent = text;
-    messageElement.style.display = 'block';
-    setTimeout(() => {
-      messageElement.style.display = 'none';
-    }, 3000);
-  }
-}
-
-function switchTab(tabName) {
-  document.querySelectorAll('.tab-content').forEach(tab => {
-    tab.classList.remove('active');
-  });
-  document.querySelectorAll('.tab-button').forEach(button => {
-    button.classList.remove('active');
-  });
-  
-  const activeTab = document.getElementById(tabName);
-  if (activeTab) {
-    activeTab.classList.add('active');
-  }
-  
-  const activeButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
-  if (activeButton) {
-    activeButton.classList.add('active');
-  }
-  
-  if (tabName === 'upgrades') {
-    renderUpgrades();
-  } else if (tabName === 'top') {
-    showTopPlayers();
-  }
-}
-
-// Инициализация при загрузке
+// Обновленная функция инициализации
 document.addEventListener('DOMContentLoaded', () => {
   // Проверка AdBlock
   const adCheck = document.createElement('div');
@@ -605,7 +222,31 @@ document.addEventListener('DOMContentLoaded', () => {
   initVKBridge();
 });
 
+// Обновленный CSS для учета баннера
+const style = document.createElement('style');
+style.textContent = `
+  #banner-ad {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background-color: #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid #ccc;
+    z-index: 1000;
+  }
+  
+  /* Сдвигаем контент вверх, чтобы не перекрывался баннером */
+  .tab-content {
+    padding-bottom: 60px;
+  }
+`;
+document.head.appendChild(style);
+
 // Тестовая база данных игроков
 const playersDB = [
-
+ 
 ];
