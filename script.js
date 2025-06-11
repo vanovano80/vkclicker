@@ -73,40 +73,202 @@ let currentPlayer = {
   bannerAdInterval: null
 };
 
+// Инициализация базы данных
+let db;
+const DB_NAME = 'ClickerGameDB';
+const DB_VERSION = 1;
+const PLAYERS_STORE = 'players';
+const SAVE_STORE = 'gameSaves';
+
+function initDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      
+      if (!db.objectStoreNames.contains(PLAYERS_STORE)) {
+        const store = db.createObjectStore(PLAYERS_STORE, { keyPath: 'id' });
+        store.createIndex('score', 'score', { unique: false });
+      }
+      
+      if (!db.objectStoreNames.contains(SAVE_STORE)) {
+        db.createObjectStore(SAVE_STORE, { keyPath: 'id' });
+      }
+    };
+
+    request.onsuccess = (event) => {
+      db = event.target.result;
+      resolve(db);
+    };
+
+    request.onerror = (event) => {
+      console.error('Ошибка открытия базы данных:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
+// Сохранение данных игрока
+async function savePlayerData() {
+  if (!db) return;
+  
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([SAVE_STORE], 'readwrite');
+    const store = transaction.objectStore(SAVE_STORE);
+    
+    const saveData = {
+      id: currentPlayer.id,
+      data: JSON.stringify(currentPlayer),
+      timestamp: Date.now()
+    };
+    
+    const request = store.put(saveData);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = (event) => {
+      console.error('Ошибка сохранения:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
+// Загрузка данных игрока
+async function loadPlayerData() {
+  if (!db) return;
+  
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([SAVE_STORE], 'readonly');
+    const store = transaction.objectStore(SAVE_STORE);
+    
+    const request = store.get(currentPlayer.id);
+    
+    request.onsuccess = () => {
+      if (request.result) {
+        try {
+          const data = JSON.parse(request.result.data);
+          Object.assign(currentPlayer, data);
+          
+          // Восстановление таймеров
+          if (currentPlayer.adMultiplierEndTime > Date.now()) {
+            currentPlayer.adMultiplierActive = true;
+            setTimeout(endAdMultiplier, currentPlayer.adMultiplierEndTime - Date.now());
+          }
+          
+          calculateTotalClickValue();
+          calculateTotalAutoClickValue();
+          startAutoClicker();
+          updateUI();
+        } catch (e) {
+          console.error('Ошибка загрузки данных:', e);
+        }
+      }
+      resolve();
+    };
+    
+    request.onerror = (event) => {
+      console.error('Ошибка загрузки:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
+// Сохранение топ-игроков
+async function saveTopPlayer() {
+  if (!db || currentPlayer.id === 0) return;
+  
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PLAYERS_STORE], 'readwrite');
+    const store = transaction.objectStore(PLAYERS_STORE);
+    
+    const playerData = {
+      id: currentPlayer.id,
+      name: currentPlayer.name,
+      score: currentPlayer.score,
+      timestamp: Date.now()
+    };
+    
+    const request = store.put(playerData);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = (event) => {
+      console.error('Ошибка сохранения топ-игрока:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
+// Получение топ-игроков
+async function getTopPlayers(limit = 100) {
+  if (!db) return [];
+  
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PLAYERS_STORE], 'readonly');
+    const store = transaction.objectStore(PLAYERS_STORE);
+    const index = store.index('score');
+    
+    const request = index.openCursor(null, 'prev');
+    const topPlayers = [];
+    
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor && topPlayers.length < limit) {
+        topPlayers.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(topPlayers);
+      }
+    };
+    
+    request.onerror = (event) => {
+      console.error('Ошибка получения топ-игроков:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
 // Инициализация VK Bridge
-function initVKBridge() {
-  if (typeof vkBridge !== 'undefined') {
-    vkBridge.send('VKWebAppInit')
-      .then(() => {
-        console.log('VK Bridge инициализирован');
-        return vkBridge.send('VKWebAppGetUserInfo');
-      })
-      .then(user => {
-        currentPlayer.id = user.id;
-        currentPlayer.name = `${user.first_name} ${user.last_name}`;
-        loadPlayerData();
-        initAdSystem();
-        startAdMultiplierCheck();
-        initBannerAd();
-      })
-      .catch(error => {
-        console.error('Ошибка VK Bridge:', error);
-        initTestMode();
-      });
-  } else {
-    console.log('VK Bridge не обнаружен, активирован тестовый режим');
+async function initVKBridge() {
+  try {
+    await initDatabase();
+    
+    if (typeof vkBridge !== 'undefined') {
+      await vkBridge.send('VKWebAppInit');
+      console.log('VK Bridge инициализирован');
+      
+      const user = await vkBridge.send('VKWebAppGetUserInfo');
+      currentPlayer.id = user.id;
+      currentPlayer.name = `${user.first_name} ${user.last_name}`;
+      
+      await loadPlayerData();
+      initAdSystem();
+      startAdMultiplierCheck();
+      initBannerAd();
+    } else {
+      console.log('VK Bridge не обнаружен, активирован тестовый режим');
+      initTestMode();
+    }
+  } catch (error) {
+    console.error('Ошибка инициализации:', error);
     initTestMode();
   }
 }
 
 // Тестовый режим
-function initTestMode() {
-  currentPlayer.id = 999;
-  currentPlayer.name = "Тестовый режим";
-  currentPlayer.adReady = true;
-  loadPlayerData();
-  startAdMultiplierCheck();
-  initBannerAd();
+async function initTestMode() {
+  try {
+    await initDatabase();
+    
+    currentPlayer.id = 999;
+    currentPlayer.name = "Тестовый режим";
+    currentPlayer.adReady = true;
+    
+    await loadPlayerData();
+    startAdMultiplierCheck();
+    initBannerAd();
+  } catch (error) {
+    console.error('Ошибка тестового режима:', error);
+  }
 }
 
 // Инициализация баннерной рекламы
@@ -156,40 +318,12 @@ function stopBannerAd() {
   }
 }
 
-// Загрузка данных игрока
-function loadPlayerData() {
-  const savedData = localStorage.getItem('clickerData');
-  if (savedData) {
-    try {
-      const data = JSON.parse(savedData);
-      Object.assign(currentPlayer, data);
-      
-      // Восстановление таймеров
-      if (currentPlayer.adMultiplierEndTime > Date.now()) {
-        currentPlayer.adMultiplierActive = true;
-        setTimeout(endAdMultiplier, currentPlayer.adMultiplierEndTime - Date.now());
-      }
-      
-      calculateTotalClickValue();
-      calculateTotalAutoClickValue();
-      startAutoClicker();
-    } catch (e) {
-      console.error('Ошибка загрузки данных:', e);
-    }
-  }
-  updateUI();
-}
-
-// Сохранение данных игрока
-function savePlayerData() {
-  localStorage.setItem('clickerData', JSON.stringify(currentPlayer));
-}
-
 // Основные функции игры
 function handleClick() {
   currentPlayer.score += currentPlayer.totalClickValue;
   updateCounter();
   savePlayerData();
+  saveTopPlayer();
 }
 
 function startAutoClicker() {
@@ -202,6 +336,7 @@ function startAutoClicker() {
       currentPlayer.score += currentPlayer.totalAutoClickValue;
       updateCounter();
       savePlayerData();
+      saveTopPlayer();
     }, 1000);
   }
 }
@@ -540,30 +675,43 @@ function renderUpgrades() {
   }
 }
 
-function showTopPlayers() {
+async function showTopPlayers() {
   const topPlayersList = document.getElementById('topPlayersList');
   if (!topPlayersList) return;
   
   topPlayersList.innerHTML = '';
   
-  const allPlayers = [...playersDB, {
-    id: currentPlayer.id,
-    name: currentPlayer.name,
-    score: currentPlayer.score
-  }];
-  
-  allPlayers.sort((a, b) => b.score - a.score);
-  
-  allPlayers.slice(0, 100).forEach((player, index) => {
-    const playerElement = document.createElement('div');
-    playerElement.className = `player ${player.id === currentPlayer.id ? 'current-player' : ''}`;
-    playerElement.innerHTML = `
-      <span class="rank">${index + 1}.</span>
-      <span class="name">${player.name}</span>
-      <span class="score">${player.score.toFixed(6)}</span>
-    `;
-    topPlayersList.appendChild(playerElement);
-  });
+  try {
+    const topPlayers = await getTopPlayers(100);
+    const allPlayers = [...topPlayers];
+    
+    // Добавляем текущего игрока, если его нет в топе
+    if (!allPlayers.some(p => p.id === currentPlayer.id)) {
+      allPlayers.push({
+        id: currentPlayer.id,
+        name: currentPlayer.name,
+        score: currentPlayer.score
+      });
+    }
+    
+    // Сортируем по убыванию счета
+    allPlayers.sort((a, b) => b.score - a.score);
+    
+    // Отображаем топ-100
+    allPlayers.slice(0, 100).forEach((player, index) => {
+      const playerElement = document.createElement('div');
+      playerElement.className = `player ${player.id === currentPlayer.id ? 'current-player' : ''}`;
+      playerElement.innerHTML = `
+        <span class="rank">${index + 1}.</span>
+        <span class="name">${player.name}</span>
+        <span class="score">${player.score.toFixed(6)}</span>
+      `;
+      topPlayersList.appendChild(playerElement);
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки топ-игроков:', error);
+    topPlayersList.innerHTML = '<p>Не удалось загрузить таблицу лидеров</p>';
+  }
 }
 
 function showMessage(text) {
@@ -633,8 +781,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // Инициализация
   initVKBridge();
 });
-
-// Тестовая база данных игроков
-const playersDB = [
- 
-];
