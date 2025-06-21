@@ -48,10 +48,10 @@ const config = {
     }
   ],
   adMultiplier: 2,
-  adDuration: 30000,    // 30 секунд
-  adCooldown: 60000,    // 1 минута
-  adRetryDelay: 30000,  // 30 секунд
-  bannerAdRefresh: 60000 // 60 секунд между обновлениями баннера
+  adDuration: 30000,
+  adCooldown: 60000,
+  adRetryDelay: 30000,
+  bannerAdRefresh: 60000
 };
 
 // Данные игрока
@@ -80,7 +80,7 @@ const DB_VERSION = 1;
 const PLAYERS_STORE = 'players';
 const SAVE_STORE = 'gameSaves';
 
-function initDatabase() {
+async function initDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -88,8 +88,8 @@ function initDatabase() {
       const db = event.target.result;
       
       if (!db.objectStoreNames.contains(PLAYERS_STORE)) {
-        const store = db.createObjectStore(PLAYERS_STORE, { keyPath: 'id' });
-        store.createIndex('score', 'score', { unique: false });
+        const playersStore = db.createObjectStore(PLAYERS_STORE, { keyPath: 'id' });
+        playersStore.createIndex('score', 'score', { unique: false });
       }
       
       if (!db.objectStoreNames.contains(SAVE_STORE)) {
@@ -99,6 +99,7 @@ function initDatabase() {
 
     request.onsuccess = (event) => {
       db = event.target.result;
+      console.log('База данных успешно открыта');
       resolve(db);
     };
 
@@ -109,10 +110,12 @@ function initDatabase() {
   });
 }
 
-// Сохранение данных игрока
 async function savePlayerData() {
-  if (!db) return;
-  
+  if (!db) {
+    console.error('База данных не инициализирована');
+    return;
+  }
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([SAVE_STORE], 'readwrite');
     const store = transaction.objectStore(SAVE_STORE);
@@ -125,18 +128,54 @@ async function savePlayerData() {
     
     const request = store.put(saveData);
     
-    request.onsuccess = () => resolve();
+    request.onsuccess = () => {
+      console.log('Данные игрока успешно сохранены');
+      resolve();
+    };
     request.onerror = (event) => {
-      console.error('Ошибка сохранения:', event.target.error);
+      console.error('Ошибка сохранения данных игрока:', event.target.error);
       reject(event.target.error);
     };
   });
 }
 
-// Загрузка данных игрока
+async function savePlayerToLeaderboard() {
+  if (!db || currentPlayer.id === 0) {
+    console.log('Не сохраняем анонимного игрока в таблицу лидеров');
+    return;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PLAYERS_STORE], 'readwrite');
+    const store = transaction.objectStore(PLAYERS_STORE);
+    
+    const playerData = {
+      id: currentPlayer.id,
+      name: currentPlayer.name,
+      score: currentPlayer.score,
+      timestamp: Date.now()
+    };
+    
+    console.log('Сохранение игрока в таблицу лидеров:', playerData);
+    const request = store.put(playerData);
+    
+    request.onsuccess = () => {
+      console.log('Игрок успешно сохранен в таблицу лидеров');
+      resolve();
+    };
+    request.onerror = (event) => {
+      console.error('Ошибка сохранения игрока в таблицу лидеров:', event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
 async function loadPlayerData() {
-  if (!db) return;
-  
+  if (!db) {
+    console.error('База данных не инициализирована');
+    return;
+  }
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([SAVE_STORE], 'readonly');
     const store = transaction.objectStore(SAVE_STORE);
@@ -149,7 +188,8 @@ async function loadPlayerData() {
           const data = JSON.parse(request.result.data);
           Object.assign(currentPlayer, data);
           
-          // Восстановление таймеров
+          console.log('Данные игрока успешно загружены:', currentPlayer);
+          
           if (currentPlayer.adMultiplierEndTime > Date.now()) {
             currentPlayer.adMultiplierActive = true;
             setTimeout(endAdMultiplier, currentPlayer.adMultiplierEndTime - Date.now());
@@ -160,48 +200,27 @@ async function loadPlayerData() {
           startAutoClicker();
           updateUI();
         } catch (e) {
-          console.error('Ошибка загрузки данных:', e);
+          console.error('Ошибка парсинга данных игрока:', e);
         }
+      } else {
+        console.log('Сохраненных данных для игрока не найдено');
       }
       resolve();
     };
     
     request.onerror = (event) => {
-      console.error('Ошибка загрузки:', event.target.error);
+      console.error('Ошибка загрузки данных игрока:', event.target.error);
       reject(event.target.error);
     };
   });
 }
 
-// Сохранение топ-игроков
-async function saveTopPlayer() {
-  if (!db || currentPlayer.id === 0) return;
-  
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([PLAYERS_STORE], 'readwrite');
-    const store = transaction.objectStore(PLAYERS_STORE);
-    
-    const playerData = {
-      id: currentPlayer.id,
-      name: currentPlayer.name,
-      score: currentPlayer.score,
-      timestamp: Date.now()
-    };
-    
-    const request = store.put(playerData);
-    
-    request.onsuccess = () => resolve();
-    request.onerror = (event) => {
-      console.error('Ошибка сохранения топ-игрока:', event.target.error);
-      reject(event.target.error);
-    };
-  });
-}
-
-// Получение топ-игроков
 async function getTopPlayers(limit = 100) {
-  if (!db) return [];
-  
+  if (!db) {
+    console.error('База данных не инициализирована');
+    return [];
+  }
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([PLAYERS_STORE], 'readonly');
     const store = transaction.objectStore(PLAYERS_STORE);
@@ -216,6 +235,7 @@ async function getTopPlayers(limit = 100) {
         topPlayers.push(cursor.value);
         cursor.continue();
       } else {
+        console.log('Загружено топ игроков:', topPlayers.length);
         resolve(topPlayers);
       }
     };
@@ -227,18 +247,18 @@ async function getTopPlayers(limit = 100) {
   });
 }
 
-// Инициализация VK Bridge
 async function initVKBridge() {
   try {
     await initDatabase();
     
     if (typeof vkBridge !== 'undefined') {
       await vkBridge.send('VKWebAppInit');
-      console.log('VK Bridge инициализирован');
       
       const user = await vkBridge.send('VKWebAppGetUserInfo');
       currentPlayer.id = user.id;
       currentPlayer.name = `${user.first_name} ${user.last_name}`;
+      
+      console.log('Пользователь VK идентифицирован:', currentPlayer);
       
       await loadPlayerData();
       initAdSystem();
@@ -254,90 +274,21 @@ async function initVKBridge() {
   }
 }
 
-// Тестовый режим
 async function initTestMode() {
   try {
     await initDatabase();
     
-    currentPlayer.id = 999;
+    currentPlayer.id = 999 + Math.floor(Math.random() * 1000);
     currentPlayer.name = "Тестовый режим";
     currentPlayer.adReady = true;
+    
+    console.log('Тестовый режим активирован для игрока:', currentPlayer);
     
     await loadPlayerData();
     startAdMultiplierCheck();
     initBannerAd();
   } catch (error) {
     console.error('Ошибка тестового режима:', error);
-  }
-}
-
-// Инициализация баннерной рекламы
-function initBannerAd() {
-  const banner = document.getElementById('banner-ad');
-  
-  if (!banner) {
-    console.error('Элемент баннера не найден');
-    return;
-  }
-
-  if (typeof vkBridge === 'undefined') {
-    // Тестовый режим
-    banner.innerHTML = '<p>Здесь был бы рекламный баннер</p>';
-    return;
-  }
-
-  // Функция показа баннера
-  const showBanner = () => {
-    vkBridge.send('VKWebAppShowBannerAd', {
-      banner_location: 'bottom'
-    }).then(data => {
-      if (!data.result) {
-        console.log('Не удалось показать баннер');
-        banner.innerHTML = '<p>Рекламный баннер недоступен</p>';
-      }
-    }).catch(error => {
-      console.error('Ошибка баннера:', error);
-      banner.innerHTML = '<p>Ошибка загрузки баннера</p>';
-    });
-  };
-
-  // Показываем баннер сразу и устанавливаем интервал обновления
-  showBanner();
-  currentPlayer.bannerAdInterval = setInterval(showBanner, config.bannerAdRefresh);
-}
-
-// Остановка баннерной рекламы
-function stopBannerAd() {
-  if (currentPlayer.bannerAdInterval) {
-    clearInterval(currentPlayer.bannerAdInterval);
-    currentPlayer.bannerAdInterval = null;
-  }
-  
-  if (typeof vkBridge !== 'undefined') {
-    vkBridge.send('VKWebAppHideBannerAd').catch(console.error);
-  }
-}
-
-// Основные функции игры
-function handleClick() {
-  currentPlayer.score += currentPlayer.totalClickValue;
-  updateCounter();
-  savePlayerData();
-  saveTopPlayer();
-}
-
-function startAutoClicker() {
-  if (currentPlayer.autoClickInterval) {
-    clearInterval(currentPlayer.autoClickInterval);
-  }
-  
-  if (currentPlayer.totalAutoClickValue > 0) {
-    currentPlayer.autoClickInterval = setInterval(() => {
-      currentPlayer.score += currentPlayer.totalAutoClickValue;
-      updateCounter();
-      savePlayerData();
-      saveTopPlayer();
-    }, 1000);
   }
 }
 
@@ -370,12 +321,42 @@ function calculateTotalAutoClickValue() {
   currentPlayer.totalAutoClickValue = total;
 }
 
-// Система прокачки
+async function handleClick() {
+  currentPlayer.score += currentPlayer.totalClickValue;
+  updateCounter();
+  
+  try {
+    await savePlayerData();
+    await savePlayerToLeaderboard();
+  } catch (error) {
+    console.error('Ошибка сохранения при клике:', error);
+  }
+}
+
+function startAutoClicker() {
+  if (currentPlayer.autoClickInterval) {
+    clearInterval(currentPlayer.autoClickInterval);
+  }
+  
+  if (currentPlayer.totalAutoClickValue > 0) {
+    currentPlayer.autoClickInterval = setInterval(async () => {
+      currentPlayer.score += currentPlayer.totalAutoClickValue;
+      updateCounter();
+      
+      try {
+        await savePlayerData();
+        await savePlayerToLeaderboard();
+      } catch (error) {
+        console.error('Ошибка сохранения при авто-клике:', error);
+      }
+    }, 1000);
+  }
+}
+
 function buyClickUpgrade(upgradeIndex) {
   const upgrade = config.clickUpgrades[upgradeIndex];
   const playerUpgrade = currentPlayer.clickUpgrades[upgradeIndex];
   
-  // Проверка требований
   if (upgrade.requires) {
     const reqUpgrade = currentPlayer.clickUpgrades[upgrade.requires.upgradeIndex];
     if (reqUpgrade.level < upgrade.requires.minLevel) {
@@ -384,13 +365,11 @@ function buyClickUpgrade(upgradeIndex) {
     }
   }
   
-  // Проверка максимального уровня
   if (playerUpgrade.level >= upgrade.levels) {
     showMessage("Максимальный уровень достигнут");
     return;
   }
   
-  // Расчет стоимости
   const cost = upgrade.baseCost * Math.pow(upgrade.costMultiplier, playerUpgrade.level);
   
   if (currentPlayer.score >= cost) {
@@ -399,7 +378,7 @@ function buyClickUpgrade(upgradeIndex) {
     
     calculateTotalClickValue();
     updateUI();
-    savePlayerData();
+    savePlayerData().catch(console.error);
     showMessage(`${upgrade.name} улучшен до уровня ${playerUpgrade.level}!`);
   } else {
     showMessage("Недостаточно средств");
@@ -432,14 +411,13 @@ function buyAutoClickUpgrade(upgradeIndex) {
     calculateTotalAutoClickValue();
     startAutoClicker();
     updateUI();
-    savePlayerData();
+    savePlayerData().catch(console.error);
     showMessage(`${upgrade.name} улучшен до уровня ${playerUpgrade.level}!`);
   } else {
     showMessage("Недостаточно средств");
   }
 }
 
-// Система рекламы
 async function initAdSystem() {
   const now = Date.now();
   if (now - currentPlayer.lastAdCheckTime < 10000) return;
@@ -479,7 +457,6 @@ async function showAdAndActivateMultiplier() {
     return;
   }
 
-  // Тестовый режим
   if (typeof vkBridge === 'undefined') {
     if (confirm("Хотите активировать множитель? (В приложении будет реклама)")) {
       activateAdMultiplier();
@@ -487,7 +464,6 @@ async function showAdAndActivateMultiplier() {
     return;
   }
 
-  // Проверка готовности рекламы
   if (!currentPlayer.adReady) {
     showMessage("Идет загрузка рекламы...");
     await initAdSystem();
@@ -510,7 +486,7 @@ async function showAdAndActivateMultiplier() {
     }
     
     activateAdMultiplier();
-    setTimeout(initAdSystem, 1000); // Перезагружаем рекламу
+    setTimeout(initAdSystem, 1000);
     
   } catch (error) {
     console.error("Ошибка показа рекламы:", error);
@@ -529,7 +505,7 @@ function activateAdMultiplier() {
   
   calculateTotalClickValue();
   updateUI();
-  savePlayerData();
+  savePlayerData().catch(console.error);
   
   setTimeout(() => {
     endAdMultiplier();
@@ -542,7 +518,7 @@ function endAdMultiplier() {
   currentPlayer.adMultiplierActive = false;
   calculateTotalClickValue();
   updateUI();
-  savePlayerData();
+  savePlayerData().catch(console.error);
   showMessage("Действие множителя закончилось");
 }
 
@@ -555,7 +531,48 @@ function startAdMultiplierCheck() {
   }, 1000);
 }
 
-// Интерфейс
+function initBannerAd() {
+  const banner = document.getElementById('banner-ad');
+  
+  if (!banner) {
+    console.error('Элемент баннера не найден');
+    return;
+  }
+
+  if (typeof vkBridge === 'undefined') {
+    banner.innerHTML = '<p>Здесь был бы рекламный баннер</p>';
+    return;
+  }
+
+  const showBanner = () => {
+    vkBridge.send('VKWebAppShowBannerAd', {
+      banner_location: 'bottom'
+    }).then(data => {
+      if (!data.result) {
+        console.log('Не удалось показать баннер');
+        banner.innerHTML = '<p>Рекламный баннер недоступен</p>';
+      }
+    }).catch(error => {
+      console.error('Ошибка баннера:', error);
+      banner.innerHTML = '<p>Ошибка загрузки баннера</p>';
+    });
+  };
+
+  showBanner();
+  currentPlayer.bannerAdInterval = setInterval(showBanner, config.bannerAdRefresh);
+}
+
+function stopBannerAd() {
+  if (currentPlayer.bannerAdInterval) {
+    clearInterval(currentPlayer.bannerAdInterval);
+    currentPlayer.bannerAdInterval = null;
+  }
+  
+  if (typeof vkBridge !== 'undefined') {
+    vkBridge.send('VKWebAppHideBannerAd').catch(console.error);
+  }
+}
+
 function updateUI() {
   updateCounter();
   updateAdButton();
@@ -685,7 +702,6 @@ async function showTopPlayers() {
     const topPlayers = await getTopPlayers(100);
     const allPlayers = [...topPlayers];
     
-    // Добавляем текущего игрока, если его нет в топе
     if (!allPlayers.some(p => p.id === currentPlayer.id)) {
       allPlayers.push({
         id: currentPlayer.id,
@@ -694,10 +710,8 @@ async function showTopPlayers() {
       });
     }
     
-    // Сортируем по убыванию счета
     allPlayers.sort((a, b) => b.score - a.score);
     
-    // Отображаем топ-100
     allPlayers.slice(0, 100).forEach((player, index) => {
       const playerElement = document.createElement('div');
       playerElement.className = `player ${player.id === currentPlayer.id ? 'current-player' : ''}`;
@@ -751,8 +765,7 @@ function switchTab(tabName) {
 }
 
 // Инициализация при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-  // Проверка AdBlock
+document.addEventListener('DOMContentLoaded', async () => {
   const adCheck = document.createElement('div');
   adCheck.innerHTML = '&nbsp;';
   adCheck.className = 'ad';
@@ -764,7 +777,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.removeChild(adCheck);
   }, 100);
 
-  // Назначение обработчиков
   document.getElementById('clickButton')?.addEventListener('click', handleClick);
   document.getElementById('watchAdButton')?.addEventListener('click', showAdAndActivateMultiplier);
   
@@ -774,10 +786,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   
-  // Глобальные функции
   window.buyClickUpgrade = buyClickUpgrade;
   window.buyAutoClickUpgrade = buyAutoClickUpgrade;
   
-  // Инициализация
-  initVKBridge();
+  await initVKBridge();
 });
