@@ -1,74 +1,104 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta property="vk:app_id" content="YOUR_APP_ID">
-    <title>Кликер | VK Mini App</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <meta charset="UTF-8" />
+  <title>VK Clicker Mini App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <div class="app-container">
-        <div class="header">
-            <h1>Кликер</h1>
-            <div id="message" class="message"></div>
-        </div>
-        
-        <div class="tab-content active" id="clicker">
-            <div class="counter-container">
-                <div class="counter" id="counter">0.000</div>
-                <div class="click-value">За клик: <span id="clickValue">0.001</span></div>
-            </div>
-            <button class="click-button" id="clickButton">Клик!</button>
-            <button class="ad-button" id="watchAdButton">Умножить клики х2 (Реклама)</button>
-        </div>
-        
-        <div class="tab-content" id="upgrades">
-            <div class="upgrades-tab">
-                <div class="upgrades-section">
-                    <h3><i class="icon">👆</i> Улучшения клика</h3>
-                    <div id="clickUpgrades" class="upgrades-container"></div>
-                </div>
-                
-                <div class="upgrades-section">
-                    <h3><i class="icon">⛏️</i> Автомайнинг</h3>
-                    <div id="autoClickUpgrades" class="upgrades-container"></div>
-                </div>
-                
-                <div class="stats-section">
-                    <h3>Ваши характеристики</h3>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-value" id="totalClickValueStat">0.000</div>
-                            <div class="stat-name">За клик</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value" id="totalAutoClickValueStat">0.000</div>
-                            <div class="stat-name">В секунду</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="tab-content" id="top">
-            <h3>Топ 100 игроков</h3>
-            <div class="top-players" id="topPlayersList"></div>
-        </div>
-        
-        <div class="tab-bar">
-            <button class="tab-button" data-tab="upgrades">
-                Прокачка
-            </button>
-            <button class="tab-button active" data-tab="clicker">
-                Кликер
-            </button>
-            <button class="tab-button" data-tab="top">
-                Топ игроков
-            </button>
-        </div>
+  <div class="app">
+    <!-- Баланс и клик -->
+    <div class="card">
+      <div class="card-header">
+        <span>Баланс</span>
+        <span class="small" id="userIdLabel">user_id: −</span>
+      </div>
+      <div class="balance-value" id="balanceText">0.000000</div>
+      <div class="sub-value">
+        За клик: <span id="clickValueText">0.000001</span>
+        <span id="clickBonusBadge" class="badge" style="display:none;">x2 активен</span>
+      </div>
+      <button id="clickButton" class="main-click-btn">
+        Кликнуть
+      </button>
+      <div class="sub-value" id="autoMiningInfo">
+        Автомайнинг: <span id="autoPerSecText">0.000000</span> / сек
+      </div>
     </div>
-    <script src="script.js"></script>
+
+    <!-- Апгрейды -->
+    <div class="card">
+      <div class="section-title">Апгрейды</div>
+      <div class="row">
+        <button id="upgradeClickBtn" class="upgrade-btn">
+          <div class="upgrade-title">
+            Прокачать клик <span id="clickLevelBadge" class="badge-blue">ур. 1</span>
+          </div>
+          <div class="upgrade-meta">
+            Увеличивает доход за клик.
+          </div>
+          <div class="upgrade-cost">
+            Стоимость: <span id="clickUpgradeCostText">0.000010</span>
+          </div>
+        </button>
+        <button id="upgradeAutoBtn" class="upgrade-btn">
+          <div class="upgrade-title">
+            Прокачать автомайнинг <span id="autoLevelBadge" class="badge-blue">ур. 0</span>
+          </div>
+          <div class="upgrade-meta">
+            Увеличивает доход в секунду.
+          </div>
+          <div class="upgrade-cost">
+            Стоимость: <span id="autoUpgradeCostText">0.000010</span>
+          </div>
+        </button>
+      </div>
+      <div class="warning" id="upgradeWarning"></div>
+    </div>
+
+    <!-- Реклама x2 за клик -->
+    <div class="card">
+      <div class="section-title">Реклама и бонус x2</div>
+      <div class="stats-line">
+        Статус: <span id="adStatusText">готово к показу</span>
+      </div>
+      <div class="stats-line small">
+        Бонус x2: <span id="bonusRemainingText">нет активного бонуса</span>
+      </div>
+      <div class="stats-line small">
+        Кулдаун: <span id="cooldownRemainingText">готово</span>
+      </div>
+      <button id="adButton" class="upgrade-btn" style="margin-top:8px; text-align:center;">
+        Удвоить клик за рекламу
+      </button>
+      <div class="small" style="margin-top:4px;">
+        При успешном показе рекламного баннера размер клика удваивается на 30 секунд, затем 30 секунд кулдауна.
+      </div>
+    </div>
+
+    <!-- Реферальная система -->
+    <div class="card">
+      <div class="section-title">Реферальная система</div>
+      <div class="stats-line">
+        Приглашено: <span id="refCountText">0</span>
+      </div>
+      <div class="stats-line small">
+        Бонус к балансу: <span id="refBalanceBonusText">0.000000</span>
+      </div>
+      <div class="stats-line small">
+        Бонус к автомайнингу: <span id="refAutoBonusText">0.000000</span> / сек
+      </div>
+      <div class="ref-link" id="refLinkText">
+        Реферальная ссылка появится после получения user_id.
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- VK Bridge CDN -->
+  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
