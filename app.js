@@ -17,11 +17,11 @@ const INITIAL_AUTO   = 0;                     // 0.000000
 const CLICK_UPGRADE_BASE_COST = floatToInt(0.000010);
 const AUTO_UPGRADE_BASE_COST  = floatToInt(0.000010);
 
-const CLICK_UPGRADE_MULTIPLIER = 1.5;  // рост цены
+const CLICK_UPGRADE_MULTIPLIER = 1.5;
 const AUTO_UPGRADE_MULTIPLIER  = 1.5;
 
-const CLICK_GAIN_MULTIPLIER_PER_LEVEL = 1.5;                 // +50% к клику за уровень
-const AUTO_GAIN_PER_LEVEL             = floatToInt(0.000001); // +0.000001 за уровень
+const CLICK_GAIN_MULTIPLIER_PER_LEVEL = 1.5;
+const AUTO_GAIN_PER_LEVEL             = floatToInt(0.000001);
 
 // x2 реклама
 const AD_BONUS_DURATION = 30;   // секунд действия x2
@@ -40,12 +40,10 @@ const state = {
   clickLevel: 1,
   autoLevel: 0,
 
-  // реклама x2
   bonusX2Active: false,
-  bonusX2Remaining: 0,      // секунды действия
-  adCooldownRemaining: 0,   // секунды кулдауна
+  bonusX2Remaining: 0,
+  adCooldownRemaining: 0,
 
-  // рефералка
   referrerId: null,
   refCount: 0,
   refBalanceBonus: 0,
@@ -80,7 +78,11 @@ const userIdLabel           = document.getElementById('userIdLabel');
 
 const toast                 = document.getElementById('toast');
 
-// ====== LocalStorage ======
+const tabButtons            = document.querySelectorAll('.tab-btn');
+const tabContents           = document.querySelectorAll('.tab-content');
+const topTableBody          = document.getElementById('topTableBody');
+
+// ====== LocalStorage для игрового состояния ======
 const LS_KEY = 'vk_clicker_state_v1';
 
 function saveState() {
@@ -120,14 +122,13 @@ function loadState() {
 // ====== VK Bridge: init, user_id, launch params ======
 async function initVK() {
   try {
-    // Инициализация VK Bridge
     if (window.vkBridge) {
       await vkBridge.send('VKWebAppInit', {});
     }
 
-    // Параметры запуска, включая vk_user_id и vk_ref [web:33][web:36]
     let launchParams = null;
     if (window.vkBridge) {
+      // Получаем параметры запуска для user_id и vk_ref [web:31][web:63][web:64]
       launchParams = await vkBridge.send('VKWebAppGetLaunchParams', {});
     }
 
@@ -135,11 +136,13 @@ async function initVK() {
       state.userId = launchParams.vk_user_id;
     }
 
-    // Обработка реферального параметра
     handleReferral(launchParams);
 
     userIdLabel.textContent = 'user_id: ' + (state.userId ?? '−');
     updateRefLink();
+
+    // После того как есть userId — обновим лидеров
+    updateLeaderboard();
 
     saveState();
     renderAll();
@@ -170,10 +173,8 @@ function handleReferral(launchParams) {
 
   if (ref && !state.referrerId) {
     state.referrerId = String(ref);
-    // Бонус за то, что этот пользователь пришёл по ссылке
     state.balance    += REF_BALANCE_BONUS;
     state.autoPerSec += REF_AUTO_BONUS;
-    // Начисление рефереру в нормальной реализации должно быть на бэкенде.
   }
 }
 
@@ -253,6 +254,7 @@ function doClick() {
   state.balance += gain;
   saveState();
   renderAll();
+  updateLeaderboard();
 }
 
 function tryUpgradeClick() {
@@ -261,13 +263,14 @@ function tryUpgradeClick() {
     showWarning('Недостаточно средств для прокачки клика');
     return;
   }
-  state.balance   -= cost;
+  state.balance    -= cost;
   state.clickLevel += 1;
-  state.clickValue = Math.round(
+  state.clickValue  = Math.round(
     INITIAL_CLICK * Math.pow(CLICK_GAIN_MULTIPLIER_PER_LEVEL, state.clickLevel - 1)
   );
   saveState();
   renderAll();
+  updateLeaderboard();
   showToast('Клик прокачан до уровня ' + state.clickLevel);
 }
 
@@ -282,6 +285,7 @@ function tryUpgradeAuto() {
   state.autoPerSec += AUTO_GAIN_PER_LEVEL;
   saveState();
   renderAll();
+  updateLeaderboard();
   showToast('Автомайнинг прокачан до уровня ' + state.autoLevel);
 }
 
@@ -294,7 +298,7 @@ function showWarning(msg) {
   }, 2000);
 }
 
-// ====== Автомайнинг и таймеры рекламы ======
+// ====== Автомайнинг и таймеры рекламы (реальное время) ======
 let lastTickTime = Date.now();
 
 function gameLoop() {
@@ -304,11 +308,12 @@ function gameLoop() {
 
   const deltaSec = deltaMs / 1000;
 
-  // Автомайнинг
+  // Автомайнинг: добавляем каждую отрисовку, баланс обновляется в реальном времени
   if (state.autoPerSec > 0) {
-    const gain = Math.floor(state.autoPerSec * deltaSec);
-    if (gain > 0) {
-      state.balance += gain;
+    const gainFloat = state.autoPerSec * deltaSec;
+    const gainInt   = Math.floor(gainFloat);
+    if (gainInt > 0) {
+      state.balance += gainInt;
     }
   }
 
@@ -340,10 +345,11 @@ function gameLoop() {
   }
 
   renderAll();
+  updateLeaderboard(); // обновляем топ с новым балансом
   requestAnimationFrame(gameLoop);
 }
 
-// ====== Реклама: VKWebAppShowBannerAd как триггер x2 ======
+// ====== Rewarded‑реклама: VKWebAppShowNativeAds ======
 async function showAdAndActivateBonus() {
   if (state.adCooldownRemaining > 0 || state.bonusX2Active) {
     return;
@@ -353,22 +359,22 @@ async function showAdAndActivateBonus() {
     return;
   }
 
-  adStatusText.textContent = 'загрузка рекламы...';
+  adStatusText.textContent = 'загрузка rewarded‑рекламы...';
 
   try {
-    // Баннерная реклама VK [web:27][web:32][web:40]
-    const data = await vkBridge.send('VKWebAppShowBannerAd', {
-      banner_location: 'bottom'
+    // Rewarded реклама: формат "reward" [web:31][web:47][web:59]
+    const data = await vkBridge.send('VKWebAppShowNativeAds', {
+      ad_format: 'reward'
     });
 
     if (data && data.result) {
       activateX2Bonus();
       showToast('Бонус x2 за клик активирован на 30 секунд!');
     } else {
-      showToast('Реклама не была показана');
+      showToast('Реклама не была просмотрена до конца');
     }
   } catch (e) {
-    console.error('ShowBannerAd error', e);
+    console.error('ShowNativeAds error', e);
     showToast('Ошибка показа рекламы');
   } finally {
     renderAll();
@@ -397,6 +403,55 @@ function showToast(message) {
   }, 2000);
 }
 
+// ====== Табы ======
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    tabButtons.forEach(b => b.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+
+    if (tab === 'top') {
+      renderTopTable();
+    }
+  });
+});
+
+// ====== Лидерборд через db.js ======
+function updateLeaderboard() {
+  if (!state.userId || typeof db === 'undefined') return;
+  const list = db.upsertUser(state.userId, state.balance);
+  // Перерисуем таблицу, если вкладка "Топ" открыта
+  const topTab = document.getElementById('tab-top');
+  if (topTab.classList.contains('active')) {
+    renderTopTable(list);
+  }
+}
+
+function renderTopTable(listOpt) {
+  if (typeof db === 'undefined') return;
+  const list = listOpt || db.loadLeaderboard();
+
+  topTableBody.innerHTML = '';
+  list.slice(0, 100).forEach((item, idx) => {
+    const tr = document.createElement('tr');
+    const tdPos = document.createElement('td');
+    const tdId  = document.createElement('td');
+    const tdBal = document.createElement('td');
+
+    tdPos.textContent = String(idx + 1);
+    tdId.textContent  = item.userId;
+    tdBal.textContent = toDisplay(item.balance);
+
+    tr.appendChild(tdPos);
+    tr.appendChild(tdId);
+    tr.appendChild(tdBal);
+
+    topTableBody.appendChild(tr);
+  });
+}
+
 // ====== Слушатели ======
 clickButton.addEventListener('click', () => {
   doClick();
@@ -417,5 +472,6 @@ adButton.addEventListener('click', () => {
 // ====== Инициализация ======
 loadState();
 renderAll();
+renderTopTable();
 requestAnimationFrame(gameLoop);
 initVK();
