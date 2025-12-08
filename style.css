@@ -19,11 +19,44 @@ body {
   gap: 12px;
 }
 
+/* Табы */
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 999px;
+  border: none;
+  background: #020617;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.tab-btn.active {
+  background: #2563eb;
+  color: #f9fafb;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
 .card {
   background: #111827;
   border-radius: 12px;
   padding: 12px 14px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  margin-bottom: 10px;
 }
 
 .card-header {
@@ -156,40 +189,9 @@ body {
   margin-left: 4px;
 }
 
-.badge-red {
-  background: rgba(239,68,68,0.14);
-  color: #f97373;
-}
-
 .badge-blue {
   background: rgba(59,130,246,0.14);
   color: #60a5fa;
-}
-
-.input-row {
-  margin-top: 6px;
-  display: flex;
-  gap: 6px;
-}
-
-.input-row input {
-  flex: 1;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid #374151;
-  background: #020617;
-  color: #e5e7eb;
-  font-size: 13px;
-}
-
-.input-row button {
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-size: 13px;
-  cursor: pointer;
 }
 
 .ref-link {
@@ -197,6 +199,39 @@ body {
   font-size: 12px;
   word-break: break-all;
   color: #93c5fd;
+}
+
+/* Таблица топа */
+.top-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.top-table th,
+.top-table td {
+  border-bottom: 1px solid #1f2937;
+  padding: 4px 2px;
+  text-align: left;
+}
+
+.top-table th {
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.top-table td:nth-child(1) {
+  width: 10%;
+}
+
+.top-table td:nth-child(2) {
+  width: 40%;
+  word-break: break-all;
+}
+
+.top-table td:nth-child(3) {
+  width: 50%;
 }
 
 .toast {
@@ -219,6 +254,4 @@ body {
 .toast.show {
   opacity: 1;
 }
-    background: #5181b8;
-    border-radius: 3px;
-}
+
