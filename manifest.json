@@ -1,0 +1,23 @@
+{
+  "account_type": "user",
+  "api_version": "5.131",
+  "app_id": 0,
+  "author": "mem67_dev",
+  "batch": "release",
+  "content": {
+    "access_token": "",
+    "countries": ["RU", "UA", "BY", "KZ"],
+    "description": "Кликер на тему мема 67",
+    "genres": ["casual", "games"],
+    "icon": "icons/icon.png",
+    "name": "Мем Кликер 67",
+    "screen_orientation": "portrait"
+  },
+  "platform": "mobile_web",
+  "request_id": "",
+  "settings": {
+    "vk_app_id": 0
+  },
+  "type": "mini_app",
+  "version": "1.0.0"
+}
