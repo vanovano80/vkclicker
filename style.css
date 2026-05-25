@@ -222,6 +222,13 @@ body {
     transform: translateY(-2px);
 }
 
+..touch-zone .zone-label {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .touch-zone .finger {
     font-size: 40px;
 }
@@ -356,11 +363,13 @@ body {
     }
 
     .touch-container {
-        flex-direction: column;
+        flex-direction: row;
+        flex-wrap: wrap;
     }
 
     .touch-zone {
-        width: 100%;
+        width: calc(50% - 6px);
+        min-width: 140px;
     }
 
     .menu-btn {
@@ -380,4 +389,3 @@ body {
     }
 }
   
-
