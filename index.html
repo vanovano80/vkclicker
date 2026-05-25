@@ -3,86 +3,95 @@ html
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Мем Кликер 67</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <!-- Шапка с балансом -->
-        <div class="header">
-            <div class="balance-display">
-                <span class="coin-icon">💎</span>
-                <span id="balance">0</span>
+    <div class="app">
+        <!-- Загрузка -->
+        <div class="loading-screen" id="loadingScreen">
+            <div class="loader"></div>
+            <p>Загрузка...</p>
+        </div>
+        
+        <!-- Игра -->
+        <div class="game-content">
+            <!-- Баланс -->
+            <div class="top-bar">
+                <div class="balance">
+                    <span class="coin">💎</span>
+                    <span id="balance">0</span>
+                </div>
+                <button class="ad-btn" id="adBtn">🎬 x2</button>
             </div>
-            <button class="ad-btn" id="doubleBtn">
-                <span>🎬</span> x2 за рекламу
-            </button>
-        </div>
-
-        <!-- Прогресс-бар умножения -->
-        <div class="multiplier-bar">
-            <div class="multiplier-fill" id="multiplierFill"></div>
-            <span class="multiplier-text">x<span id="multiplierValue">1</span></span>
-        </div>
-
-        <!-- Главная игровая зона -->
-        <div class="game-area">
-            <div class="meme-character" id="character">67</div>
-            <div class="score-popup" id="scorePopup">+0</div>
-        </div>
-
-        <!-- Зоны касания -->
-        <div class="touch-zones">
-            <div class="touch-zone left" id="leftZone">
-                <div class="finger-icon">👆</div>
-                <span>⬆️⬇️</span>
-            </div>
-            <div class="touch-zone right" id="rightZone">
-                <div class="finger-icon">👆</div>
-                <span>⬆️⬇️</span>
-            </div>
-        </div>
-
-        <!-- Зона прокачки -->
-        <div class="upgrade-panel" id="upgradePanel">
-            <div class="upgrade-header">⬆️ ПРОКАЧКА</div>
             
-            <div class="upgrade-item" id="powerUpgrade">
-                <div class="upgrade-info">
-                    <span class="upgrade-name">💪 Мощь клика</span>
-                    <span class="upgrade-level">Уровень: <span id="powerLevel">1</span></span>
-                </div>
-                <button class="upgrade-btn" id="powerBtn">
-                    <span id="powerCost">100</span> 💎
-                </button>
+            <!-- Персонаж -->
+            <div class="character-area">
+                <div class="character" id="character">67</div>
+                <div class="score-float" id="scoreFloat">+0</div>
             </div>
-
-            <div class="upgrade-item" id="autoUpgrade">
-                <div class="upgrade-info">
-                    <span class="upgrade-name">🤖 Авто-клик</span>
-                    <span class="upgrade-level">Уровень: <span id="autoLevel">0</span></span>
+            
+            <!-- Прогресс -->
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
                 </div>
-                <button class="upgrade-btn" id="autoBtn">
-                    <span id="autoCost">500</span> 💎
-                </button>
+                <span class="multiplier-badge">x<span id="multiplier">1</span></span>
             </div>
-
-            <div class="upgrade-item" id="multiplierUpgrade">
-                <div class="upgrade-info">
-                    <span class="upgrade-name">🔥 Множитель</span>
-                    <span class="upgrade-level">Уровень: <span id="multiLevel">1</span></span>
+            
+            <!-- Зоны -->
+            <div class="touch-container">
+                <div class="touch-zone" id="leftZone">
+                    <div class="finger">👆</div>
+                    <div class="arrows">⬆️⬇️</div>
                 </div>
-                <button class="upgrade-btn" id="multiBtn">
-                    <span id="multiCost">1000</span> 💎
-                </button>
+                <div class="touch-zone" id="rightZone">
+                    <div class="finger">👆</div>
+                    <div class="arrows">⬆️⬇️</div>
+                </div>
+            </div>
+            
+            <!-- Меню -->
+            <button class="menu-btn" id="menuBtn">⚙️</button>
+        </div>
+        
+        <!-- Панель прокачки -->
+        <div class="upgrade-panel" id="upgradePanel">
+            <div class="panel-header">
+                <span>⬆️ ПРОКАЧКА</span>
+                <button class="close-btn" id="closePanel">✕</button>
+            </div>
+            
+            <div class="upgrade-card">
+                <span class="upgrade-icon">💪</span>
+                <div class="upgrade-info">
+                    <div class="upgrade-name">Мощь клика</div>
+                    <div class="upgrade-level">Ур. <span id="powerLvl">1</span></div>
+                </div>
+                <button class="buy-btn" id="powerBtn"><span id="powerPrice">100</span> 💎</button>
+            </div>
+            
+            <div class="upgrade-card">
+                <span class="upgrade-icon">🤖</span>
+                <div class="upgrade-info">
+                    <div class="upgrade-name">Авто-клик</div>
+                    <div class="upgrade-level">Ур. <span id="autoLvl">0</span></div>
+                </div>
+                <button class="buy-btn" id="autoBtn"><span id="autoPrice">500</span> 💎</button>
+            </div>
+            
+            <div class="upgrade-card">
+                <span class="upgrade-icon">🔥</span>
+                <div class="upgrade-info">
+                    <div class="upgrade-name">Множитель</div>
+                    <div class="upgrade-level">Ур. <span id="multiLvl">1</span></div>
+                </div>
+                <button class="buy-btn" id="multiBtn"><span id="multiPrice">1000</span> 💎</button>
             </div>
         </div>
-
-        <!-- Кнопка прокачки (бургер) -->
-        <button class="toggle-upgrades" id="toggleUpgrades">⚙️</button>
     </div>
-
+    
     <script src="script.js"></script>
 </body>
 </html>
