@@ -213,6 +213,7 @@ body {
     color: #f8fafc;
     font-size: 22px;
     transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    min-width: 0;
 }
 
 .touch-zone.active {
@@ -222,19 +223,11 @@ body {
     transform: translateY(-2px);
 }
 
-..touch-zone .zone-label {
+.touch-zone .zone-label {
     font-size: 16px;
     font-weight: 800;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-}
-
-.touch-zone .finger {
-    font-size: 40px;
-}
-
-.touch-zone .arrows {
-    font-size: 18px;
 }
 
 .menu-btn {
@@ -364,12 +357,14 @@ body {
 
     .touch-container {
         flex-direction: row;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        align-items: stretch;
     }
 
     .touch-zone {
         width: calc(50% - 6px);
         min-width: 140px;
+        max-width: calc(50% - 6px);
     }
 
     .menu-btn {
