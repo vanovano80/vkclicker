@@ -360,6 +360,7 @@ function buyUpgrade(type) {
 
 // ==================== РЕКЛАМА ====================
 async function watchAd() {
+    // НЕТ ОГРАНИЧЕНИЯ ПО ОЧКАМ - реклама доступна всегда
     DOM.adBtn.disabled = true;
     DOM.adBtn.textContent = '⏳ Загрузка...';
 
@@ -369,8 +370,11 @@ async function watchAd() {
         if (success) {
             activateDouble();
         } else {
+            // Утешительный бонус если реклама не сработала
             DOM.adBtn.textContent = '⚠️ Бонус!';
-            Game.balance += Math.floor(Game.clickPower * Game.multiplier * 50);
+            const bonus = Math.floor(Game.clickPower * Game.multiplier * 50);
+            Game.balance += bonus;
+            showScorePopup(bonus);
             updateUI();
             
             setTimeout(() => {
@@ -383,7 +387,9 @@ async function watchAd() {
         console.error('Ошибка при показе рекламы:', error);
         DOM.adBtn.textContent = '❌ Ошибка';
         
-        Game.balance += Math.floor(Game.clickPower * Game.multiplier * 20);
+        const bonus = Math.floor(Game.clickPower * Game.multiplier * 20);
+        Game.balance += bonus;
+        showScorePopup(bonus);
         updateUI();
         
         setTimeout(() => {
