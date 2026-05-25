@@ -81,7 +81,7 @@ const VK = {
                 type: 'reward'
             });
             console.log('Rewarded result:', result);
-            return result && result.success === true;
+            return result && (result.success === true || result.result === true);
         } catch (e) {
             console.error('Реклама ошибка:', e);
             return false;
