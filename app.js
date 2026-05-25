@@ -15,12 +15,21 @@ const VK = {
         };
 
         return new Promise((resolve) => {
+            const completeInit = () => {
+                this.ready = true;
+                resolve(true);
+            };
+
+            const failInit = (message) => {
+                console.warn('VK init failed:', message);
+                resolve(false);
+            };
+
             const checkVK = setInterval(() => {
                 const bridge = detectBridge();
                 if (bridge) {
                     clearInterval(checkVK);
                     this.bridge = bridge;
-                    this.ready = true;
 
                     if (typeof bridge.subscribe === 'function') {
                         bridge.subscribe((e) => console.log('VK Event:', e));
@@ -28,25 +37,25 @@ const VK = {
 
                     if (typeof bridge.send === 'function') {
                         bridge.send('VKWebAppInit')
-                            .then(() => console.log('VK инициализирован'))
-                            .catch((e) => console.warn('VK init error:', e))
-                            .finally(() => resolve());
+                            .then(() => {
+                                console.log('VK инициализирован');
+                                completeInit();
+                            })
+                            .catch((e) => {
+                                console.warn('VK init error:', e);
+                                failInit(e);
+                            });
                     } else {
-                        resolve();
+                        failInit('bridge.send is not a function');
                     }
                 }
             }, 100);
 
             setTimeout(() => {
                 clearInterval(checkVK);
-                if (!this.ready) {
-                    const bridge = detectBridge();
-                    if (bridge) {
-                        this.bridge = bridge;
-                        this.ready = true;
-                    }
+                if (!this.bridge) {
+                    failInit('VK bridge not found');
                 }
-                resolve();
             }, 3000);
         });
     },
@@ -59,6 +68,11 @@ const VK = {
     },
 
     async showRewardedVideo() {
+        if (!this.ready) {
+            console.warn('VK showRewardedVideo blocked: app not initialized');
+            return false;
+        }
+
         try {
             const result = await this.send('VKWebAppShowRewardedVideo', {
                 type: 'reward'
@@ -72,6 +86,10 @@ const VK = {
     },
 
     async getUserInfo() {
+        if (!this.ready) {
+            return null;
+        }
+
         try {
             return await this.send('VKWebAppGetUserInfo');
         } catch (e) {
@@ -455,9 +473,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateUI();
 
     // Инициализируем VK Bridge
-    await VK.init();
-    Game.isReady = true;
-    console.log('✅ VK Ready:', VK.ready);
+    const vkReady = await VK.init();
+    Game.isReady = vkReady;
+    DOM.adBtn.disabled = !vkReady;
+    console.log('✅ VK Ready:', vkReady);
 
     // Скрываем загрузку
     setTimeout(() => {
@@ -480,3 +499,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     console.log('✅ Приложение готово!');
 });
+
