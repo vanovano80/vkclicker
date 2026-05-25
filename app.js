@@ -4,67 +4,80 @@ const VK = {
     ready: false,
 
     async init() {
+        const detectBridge = () => {
+            if (window.vkBridge !== undefined) {
+                return window.vkBridge;
+            }
+            if (window.VK !== undefined && window.VK.Bridge !== undefined) {
+                return window.VK.Bridge;
+            }
+            return null;
+        };
+
         return new Promise((resolve) => {
-            // Ждём загрузки VK SDK
             const checkVK = setInterval(() => {
-                if (window.VK !== undefined) {
+                const bridge = detectBridge();
+                if (bridge) {
                     clearInterval(checkVK);
-                    this.bridge = window.VK;
+                    this.bridge = bridge;
                     this.ready = true;
-                    
-                    // Инициализация приложения
-                    if (this.bridge && this.bridge.Bridge) {
-                        this.bridge.Bridge.subscribe((e) => {
-                            console.log('VK Event:', e);
-                        });
-                        
-                        this.bridge.Bridge.send('VKWebAppInit')
-                            .then(() => console.log('VK инициализирован'))
-                            .catch(e => console.log('VK init error:', e));
+
+                    if (typeof bridge.subscribe === 'function') {
+                        bridge.subscribe((e) => console.log('VK Event:', e));
                     }
-                    
-                    resolve();
+
+                    if (typeof bridge.send === 'function') {
+                        bridge.send('VKWebAppInit')
+                            .then(() => console.log('VK инициализирован'))
+                            .catch((e) => console.warn('VK init error:', e))
+                            .finally(() => resolve());
+                    } else {
+                        resolve();
+                    }
                 }
             }, 100);
 
-            // Таймаут через 3 секунды
             setTimeout(() => {
                 clearInterval(checkVK);
+                if (!this.ready) {
+                    const bridge = detectBridge();
+                    if (bridge) {
+                        this.bridge = bridge;
+                        this.ready = true;
+                    }
+                }
                 resolve();
             }, 3000);
         });
     },
 
+    async send(method, params = {}) {
+        if (this.bridge && typeof this.bridge.send === 'function') {
+            return this.bridge.send(method, params);
+        }
+        throw new Error('VK bridge not ready');
+    },
+
     async showRewardedVideo() {
-        return new Promise(async (resolve) => {
-            if (this.bridge && this.bridge.Bridge) {
-                try {
-                    const result = await this.bridge.Bridge.send('VKWebAppShowRewardedVideo', {
-                        type: 'reward'
-                    });
-                    
-                    console.log('Rewarded result:', result);
-                    resolve(result && result.success === true);
-                } catch (e) {
-                    console.error('Реклама ошибка:', e);
-                    resolve(false);
-                }
-            } else {
-                // Браузер - тестовый режим
-                resolve(false);
-            }
-        });
+        try {
+            const result = await this.send('VKWebAppShowRewardedVideo', {
+                type: 'reward'
+            });
+            console.log('Rewarded result:', result);
+            return result && result.success === true;
+        } catch (e) {
+            console.error('Реклама ошибка:', e);
+            return false;
+        }
     },
 
     async getUserInfo() {
-        if (this.bridge && this.bridge.Bridge) {
-            try {
-                return await this.bridge.Bridge.send('VKWebAppGetUserInfo');
-            } catch (e) {
-                return null;
-            }
+        try {
+            return await this.send('VKWebAppGetUserInfo');
+        } catch (e) {
+            console.warn('UserInfo error:', e);
+            return null;
         }
-        return null;
     }
 };
 
@@ -72,10 +85,9 @@ const VK = {
 const Game = {
     balance: 0,
     clickPower: 1,
-    autoLevel: 0,
+    autoLvl: 0,
     multiplier: 1,
     powerLvl: 1,
-    autoLvl: 0,
     multiLvl: 1,
     powerCost: 100,
     autoCost: 500,
@@ -213,8 +225,8 @@ function levelUp() {
 }
 
 function autoClick() {
-    if (Game.autoLevel > 0) {
-        const points = Game.autoLevel * Game.clickPower * Game.multiplier;
+    if (Game.autoLvl > 0) {
+        const points = Game.autoLvl * Game.clickPower * Game.multiplier;
         Game.balance += points;
         updateUI();
     }
@@ -244,7 +256,8 @@ function buyUpgrade(type) {
             if (Game.balance >= Game.multiCost) {
                 Game.balance -= Game.multiCost;
                 Game.multiLvl++;
-                Game.multiplier = Game.multiLvl;Game.multiCost = Math.floor(1000 * Math.pow(2, Game.multiLvl - 1));
+                Game.multiplier = Game.multiLvl;
+                Game.multiCost = Math.floor(1000 * Math.pow(2, Game.multiLvl - 1));
             }
             break;
     }
@@ -467,3 +480,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     console.log('✅ Приложение готово!');
 });
+
