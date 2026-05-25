@@ -8,6 +8,9 @@ const VK = {
             if (window.vkBridge !== undefined) {
                 return window.vkBridge;
             }
+            if (window.VKBridge !== undefined) {
+                return window.VKBridge;
+            }
             if (window.VK !== undefined && window.VK.Bridge !== undefined) {
                 return window.VK.Bridge;
             }
@@ -499,4 +502,3 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     console.log('✅ Приложение готово!');
 });
-
