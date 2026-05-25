@@ -65,9 +65,17 @@ const VK = {
 
     async send(method, params = {}) {
         if (this.bridge && typeof this.bridge.send === 'function') {
-            return this.bridge.send(method, params);
+            const result = await this.bridge.send(method, params);
+            console.log('VK send:', method, params, '=>', result);
+            return result;
         }
         throw new Error('VK bridge not ready');
+    },
+
+    isRewardSuccess(result) {
+        return result === true || result === 'true' || result === 1 ||
+            (result && (result.success === true || result.result === true || result.ok === true)) ||
+            (result && result.data && (result.data.result === true || result.data.success === true || result.data.ok === true));
     },
 
     async showRewardedVideo() {
@@ -76,19 +84,28 @@ const VK = {
             return false;
         }
 
-        try {
-            console.log('VK showRewardedVideo request');
-            const result = await this.send('VKWebAppShowRewardedVideo', {
-                type: 'reward'
-            });
-            console.log('Rewarded result:', result);
-            const success = result === true || result === 'true' || result.success === true || result.result === true || (result.data && result.data.result === true);
-            console.log('Reward success:', success);
-            return success;
-        } catch (e) {
-            console.error('Реклама ошибка:', e);
-            return false;
+        const payloads = [
+            { ad_format: 'reward' },
+            { type: 'reward' }
+        ];
+
+        for (const payload of payloads) {
+            try {
+                console.log('VK showRewardedVideo request:', payload);
+                const result = await this.send('VKWebAppShowRewardedVideo', payload);
+                console.log('Rewarded result:', result);
+                const success = this.isRewardSuccess(result);
+                console.log('Reward success:', success);
+                if (success) {
+                    return true;
+                }
+            } catch (e) {
+                console.warn('Rewarded video call failed for payload', payload, e);
+            }
         }
+
+        console.warn('Rewarded video unavailable or not supported');
+        return false;
     },
 
     async getUserInfo() {
