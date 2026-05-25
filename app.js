@@ -84,28 +84,24 @@ const VK = {
             return false;
         }
 
-        const payloads = [
-            { ad_format: 'reward' },
-            { type: 'reward' }
-        ];
-
-        for (const payload of payloads) {
+        try {
+            console.log('VK showAds request with reward');
+            const result = await this.send('VKWebAppShowAds');
+            console.log('ShowAds result:', result);
+            return this.isRewardSuccess(result);
+        } catch (e) {
+            console.error('ShowAds error:', e);
+            
             try {
-                console.log('VK showRewardedVideo request:', payload);
-                const result = await this.send('VKWebAppShowRewardedVideo', payload);
-                console.log('Rewarded result:', result);
-                const success = this.isRewardSuccess(result);
-                console.log('Reward success:', success);
-                if (success) {
-                    return true;
-                }
-            } catch (e) {
-                console.warn('Rewarded video call failed for payload', payload, e);
+                console.log('Fallback: VK showRewardedVideo with alternate params');
+                const result = await this.send('VKWebAppShowRewardedVideo');
+                console.log('Rewarded result (fallback):', result);
+                return this.isRewardSuccess(result);
+            } catch (e2) {
+                console.error('Rewarded video also failed:', e2);
+                return false;
             }
         }
-
-        console.warn('Rewarded video unavailable or not supported');
-        return false;
     },
 
     async getUserInfo() {
