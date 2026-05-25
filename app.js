@@ -77,11 +77,14 @@ const VK = {
         }
 
         try {
+            console.log('VK showRewardedVideo request');
             const result = await this.send('VKWebAppShowRewardedVideo', {
                 type: 'reward'
             });
             console.log('Rewarded result:', result);
-            return result && (result.success === true || result.result === true);
+            const success = result === true || result === 'true' || result.success === true || result.result === true || (result.data && result.data.result === true);
+            console.log('Reward success:', success);
+            return success;
         } catch (e) {
             console.error('Реклама ошибка:', e);
             return false;
