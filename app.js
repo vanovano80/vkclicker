@@ -1,477 +1,427 @@
-// ====== Константы чисел в микромонетах (1 ед. = 0.000001) ======
-const PRECISION = 1_000_000;
-
-function toDisplay(valueInt) {
-  return (valueInt / PRECISION).toFixed(6);
-}
-
-function floatToInt(valueFloat) {
-  return Math.round(valueFloat * PRECISION);
-}
-
-// ====== Начальные значения ======
-const INITIAL_BALANCE = 0;                    // 0.000000
-const INITIAL_CLICK  = floatToInt(0.000001);  // 1
-const INITIAL_AUTO   = 0;                     // 0.000000
-
-const CLICK_UPGRADE_BASE_COST = floatToInt(0.000010);
-const AUTO_UPGRADE_BASE_COST  = floatToInt(0.000010);
-
-const CLICK_UPGRADE_MULTIPLIER = 1.5;
-const AUTO_UPGRADE_MULTIPLIER  = 1.5;
-
-const CLICK_GAIN_MULTIPLIER_PER_LEVEL = 1.5;
-const AUTO_GAIN_PER_LEVEL             = floatToInt(0.000001);
-
-// x2 реклама
-const AD_BONUS_DURATION = 30;   // секунд действия x2
-const AD_COOLDOWN       = 30;   // секунд кулдауна после конца
-
-// Реферальные бонусы
-const REF_BALANCE_BONUS = floatToInt(0.000050);
-const REF_AUTO_BONUS    = floatToInt(0.000001);
-
-// ====== Состояние ======
-const state = {
-  userId: null,
-  balance: INITIAL_BALANCE,
-  clickValue: INITIAL_CLICK,
-  autoPerSec: INITIAL_AUTO,
-  clickLevel: 1,
-  autoLevel: 0,
-
-  bonusX2Active: false,
-  bonusX2Remaining: 0,
-  adCooldownRemaining: 0,
-
-  referrerId: null,
-  refCount: 0,
-  refBalanceBonus: 0,
-  refAutoBonus: 0,
+const VK = {
+    init: () => {
+        if (window.vkBridge) {
+            vkBridge.send('VKWebAppInit', {});
+        }
+    },
+    
+    getRewardedVideo: () => {
+        return new Promise((resolve, reject) => {
+            if (window.vkBridge) {
+                vkBridge.send('VKWebAppGetRewardedVideo', { type: 'reward' })
+                    .then(result => {
+                        if (result.success) {
+                            resolve(result);
+                        } else {
+                            reject(new Error('Реклама не загружена'));
+                        }
+                    })
+                    .catch(err => {
+                        reject(err);
+                    });
+            } else {
+                // Тестовый режим для браузера
+                console.log('VK SDK не найден - тестовый режим');
+                resolve({ success: true, test: true });
+            }
+        });
+    },
+    
+    showPayVault: (amount) => {
+        return new Promise((resolve, reject) => {
+            if (window.vkBridge) {
+                vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' })
+                    .then(resolve)
+                    .catch(reject);
+            } else {
+                resolve({ success: true });
+            }
+        });
+    }
 };
 
-// ====== DOM ======
-const balanceText        = document.getElementById('balanceText');
-const clickValueText     = document.getElementById('clickValueText');
-const autoPerSecText     = document.getElementById('autoPerSecText');
-const clickButton        = document.getElementById('clickButton');
-
-const upgradeClickBtn       = document.getElementById('upgradeClickBtn');
-const upgradeAutoBtn        = document.getElementById('upgradeAutoBtn');
-const clickUpgradeCostText  = document.getElementById('clickUpgradeCostText');
-const autoUpgradeCostText   = document.getElementById('autoUpgradeCostText');
-const upgradeWarning        = document.getElementById('upgradeWarning');
-const clickLevelBadge       = document.getElementById('clickLevelBadge');
-const autoLevelBadge        = document.getElementById('autoLevelBadge');
-
-const adButton              = document.getElementById('adButton');
-const adStatusText          = document.getElementById('adStatusText');
-const bonusRemainingText    = document.getElementById('bonusRemainingText');
-const cooldownRemainingText = document.getElementById('cooldownRemainingText');
-const clickBonusBadge       = document.getElementById('clickBonusBadge');
-
-const refCountText          = document.getElementById('refCountText');
-const refBalanceBonusText   = document.getElementById('refBalanceBonusText');
-const refAutoBonusText      = document.getElementById('refAutoBonusText');
-const refLinkText           = document.getElementById('refLinkText');
-const userIdLabel           = document.getElementById('userIdLabel');
-
-const toast                 = document.getElementById('toast');
-
-const tabButtons            = document.querySelectorAll('.tab-btn');
-const tabContents           = document.querySelectorAll('.tab-content');
-const topTableBody          = document.getElementById('topTableBody');
-
-// ====== LocalStorage для игрового состояния ======
-const LS_KEY = 'vk_clicker_state_v1';
-
-function saveState() {
-  const data = {
-    userId: state.userId,
-    balance: state.balance,
-    clickValue: state.clickValue,
-    autoPerSec: state.autoPerSec,
-    clickLevel: state.clickLevel,
-    autoLevel: state.autoLevel,
-    bonusX2Active: state.bonusX2Active,
-    bonusX2Remaining: state.bonusX2Remaining,
-    adCooldownRemaining: state.adCooldownRemaining,
-    referrerId: state.referrerId,
-    refCount: state.refCount,
-    refBalanceBonus: state.refBalanceBonus,
-    refAutoBonus: state.refAutoBonus,
-  };
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.error('LocalStorage save error', e);
-  }
-}
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    Object.assign(state, data);
-  } catch (e) {
-    console.error('LocalStorage load error', e);
-  }
-}
-
-// ====== VK Bridge: init, user_id, launch params ======
-async function initVK() {
-  try {
-    if (window.vkBridge) {
-      await vkBridge.send('VKWebAppInit', {});
+// ==================== ИГРОВОЕ СОСТОЯНИЕ ====================
+const GameState = {
+    balance: 0,
+    clickPower: 1,
+    autoClicks: 0,
+    multiplier: 1,
+    
+    // Уровни прокачки
+    powerLevel: 1,
+    autoLevel: 0,
+    multiLevel: 1,
+    
+    // Стоимость прокачек
+    powerCost: 100,
+    autoCost: 500,
+    multiCost: 1000,
+    
+    // Прогресс множителя
+    multiplierProgress: 0,
+    multiplierGoal: 100,
+    
+    // Сохранение
+    save() {
+        localStorage.setItem('mem67_save', JSON.stringify({
+            balance: this.balance,
+            powerLevel: this.powerLevel,
+            autoLevel: this.autoLevel,
+            multiLevel: this.multiLevel
+        }));
+    },
+    
+    load() {
+        const saved = localStorage.getItem('mem67_save');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.balance = data.balance || 0;
+            this.powerLevel = data.powerLevel || 1;
+            this.autoLevel = data.autoLevel || 0;
+            this.multiLevel = data.multiLevel || 1;
+            this.updateClickPower();
+            this.updateMultiplier();
+            this.updateCosts();
+        }
+    },
+    
+    updateClickPower() {
+        this.clickPower = this.powerLevel;
+    },
+    
+    updateMultiplier() {
+        this.multiplier = this.multiLevel;
+    },
+    
+    updateCosts() {
+        this.powerCost = Math.floor(100 * Math.pow(1.5, this.powerLevel - 1));
+        this.autoCost = Math.floor(500 * Math.pow(1.8, this.autoLevel));
+        this.multiCost = Math.floor(1000 * Math.pow(2, this.multiLevel - 1));
     }
+};
 
-    let launchParams = null;
-    if (window.vkBridge) {
-      // Получаем параметры запуска для user_id и vk_ref [web:31][web:63][web:64]
-      launchParams = await vkBridge.send('VKWebAppGetLaunchParams', {});
+// ==================== УПРАВЛЕНИЕ КАСАНИЯМИ ====================
+const TouchController = {
+    leftTouch: null,
+    rightTouch: null,
+    leftStartY: 0,
+    rightStartY: 0,
+    lastLeftY: 0,
+    lastRightY: 0,
+    
+    sensitivity: 30, // Порог для срабатывания
+    
+    init() {
+        const leftZone = document.getElementById('leftZone');
+        const rightZone = document.getElementById('rightZone');
+        
+        // Prevent default touch behavior
+        document.body.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+        
+        // Левый сенсор
+        leftZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.leftTouch = e.touches[0];
+            this.leftStartY = this.leftTouch.clientY;
+            this.lastLeftY = this.leftStartY;
+            leftZone.classList.add('active');
+        }, { passive: false });
+        
+        leftZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (this.leftTouch) {
+                const touch = e.touches[0];
+                const deltaY = touch.clientY - this.lastLeftY;
+                this.lastLeftY = touch.clientY;
+                
+                if (this.rightTouch) {
+                    // Оба пальца активны - начисляем очки
+                    this.processBothFingers(deltaY);
+                }
+            }
+        }, { passive: false });
+        
+        leftZone.addEventListener('touchend', () => {
+            this.leftTouch = null;
+            leftZone.classList.remove('active');
+        });
+        
+        leftZone.addEventListener('touchcancel', () => {
+            this.leftTouch = null;
+            leftZone.classList.remove('active');
+        });
+        
+        // Правый сенсор
+        rightZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.rightTouch = e.touches[0];
+            this.rightStartY = this.rightTouch.clientY;
+            this.lastRightY = this.rightStartY;
+            rightZone.classList.add('active');
+        }, { passive: false });
+        
+        rightZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (this.rightTouch) {
+                const touch = e.touches[0];
+                const deltaY = touch.clientY - this.lastRightY;
+                this.lastRightY = touch.clientY;
+                
+                if (this.leftTouch) {
+                    this.processBothFingers(deltaY);
+                }
+            }
+        }, { passive: false });
+        
+        rightZone.addEventListener('touchend', () => {
+            this.rightTouch = null;
+            rightZone.classList.remove('active');
+        });
+        
+        rightZone.addEventListener('touchcancel', () => {
+            this.rightTouch = null;
+            rightZone.classList.remove('active');
+        });
+        
+        // Мышь для десктопного тестирования
+        let mouseDownLeft = false, mouseDownRight = false;
+        
+        leftZone.addEventListener('mousedown', () => {
+            mouseDownLeft = true;
+            leftZone.classList.add('active');
+        });
+        
+        leftZone.addEventListener('mousemove', (e) => {
+            if (mouseDownLeft && mouseDownRight) {
+                this.processBothFingers(e.movementY);
+            }
+        });
+        
+        leftZone.addEventListener('mouseup', () => {
+            mouseDownLeft = false;
+            leftZone.classList.remove('active');
+        });
+        
+        leftZone.addEventListener('mouseleave', () => {
+            mouseDownLeft = false;
+            leftZone.classList.remove('active');
+        });
+        
+        rightZone.addEventListener('mousedown', () => {
+            mouseDownRight = true;
+            rightZone.classList.add('active');
+        });
+        
+        rightZone.addEventListener('mousemove', (e) => {
+            if (mouseDownLeft && mouseDownRight) {
+                this.processBothFingers(e.movementY);
+            }
+        });
+        
+        rightZone.addEventListener('mouseup', () => {
+            mouseDownRight = false;
+            rightZone.classList.remove('active');
+        });
+        
+        rightZone.addEventListener('mouseleave', () => {
+            mouseDownRight = false;
+            rightZone.classList.remove('active');
+        });
+    },
+    
+    processBothFingers(deltaY) {
+        if (Math.abs(deltaY) > 0) {
+            const direction = deltaY < 0 ? 'up' : 'down';
+            GameController.addScore(direction);
+            GameController.animateCharacter();
+        }
     }
+};
 
-    if (launchParams && launchParams.vk_user_id) {
-      state.userId = launchParams.vk_user_id;
+// ==================== КОНТРОЛЛЕР ИГРЫ ====================
+const GameController = {
+    scoreAccumulator: 0,
+    isDoubled: false,
+    
+    init() {
+        GameState.load();
+        TouchController.init();
+        this.updateUI();
+        
+        // Авто-клики
+        setInterval(() => this.autoClick(), 1000);
+        
+        // Автосохранение
+        setInterval(() => GameState.save(), 5000);
+        
+        // Обработчики кнопок
+        document.getElementById('toggleUpgrades').addEventListener('click', () => {
+            document.getElementById('upgradePanel').classList.toggle('open');
+        });
+        
+        document.getElementById('doubleBtn').addEventListener('click', () => this.watchAd());
+        document.getElementById('powerBtn').addEventListener('click', () => this.buyUpgrade('power'));
+        document.getElementById('autoBtn').addEventListener('click', () => this.buyUpgrade('auto'));
+        document.getElementById('multiBtn').addEventListener('click', () => this.buyUpgrade('multi'));
+        
+        // Инициализация VK
+        VK.init();
+        
+        // Обработка закрытия приложения
+        window.addEventListener('beforeunload', () => GameState.save());
+    },
+    
+    addScore(direction) {
+        const multiplier = this.isDoubled ? 2 : 1;
+        const points = GameState.clickPower * GameState.multiplier * multiplier;
+        
+        GameState.balance += points;
+        GameState.multiplierProgress += 1;
+        
+        // Анимация очков
+        this.showScorePopup(points);
+        this.updateUI();
+        
+        // Проверка прогресса множителя
+        if (GameState.multiplierProgress >= GameState.multiplierGoal) {
+            this.levelUpMultiplier();
+        }
+    },
+    
+    showScorePopup(points) {
+        const popup = document.getElementById('scorePopup');
+        popup.textContent = `+${points}`;
+        popup.style.animation = 'none';
+        popup.offsetHeight; // Trigger reflow
+        popup.style.animation = 'scoreFloat 1s forwards';
+    },
+    
+    animateCharacter() {
+        const char = document.getElementById('character');
+        char.classList.add('active');
+        setTimeout(() => char.classList.remove('active'), 100);
+    },
+    
+    levelUpMultiplier() {
+        GameState.multiplierProgress = 0;
+        GameState.multiLevel++;
+        GameState.multiplierGoal = Math.floor(100 * Math.pow(1.5, GameState.multiLevel - 1));
+        GameState.updateMultiplier();
+        this.updateUI();
+    },
+    
+    autoClick() {
+        if (GameState.autoLevel > 0) {
+            const autoPoints = GameState.autoLevel * GameState.clickPower * GameState.multiplier;
+            GameState.balance += autoPoints;
+            this.updateUI();
+        }
+    },
+    
+    watchAd() {
+        document.getElementById('doubleBtn').textContent = '⏳ Загрузка...';
+        document.getElementById('doubleBtn').disabled = true;
+        
+        VK.getRewardedVideo()
+            .then(result => {
+                this.isDoubled = true;
+                document.getElementById('doubleBtn').textContent = '✓ x2 АКТИВНО!'; 
+                  // Снимаем x2 через 30 секунд
+                setTimeout(() => {
+                    this.isDoubled = false;
+                    document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
+                    document.getElementById('doubleBtn').disabled = false;
+                }, 30000);
+            })
+            .catch(err => {
+                console.error('Реклама:', err);
+                document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
+                document.getElementById('doubleBtn').disabled = false;
+                
+                // Fallback - тестовый режим
+                if (window.location.hostname === 'localhost' || window.location.search === '?test') {
+                    this.isDoubled = true;
+                    document.getElementById('doubleBtn').textContent = '✓ x2 ТЕСТ!';
+                    setTimeout(() => {
+                        this.isDoubled = false;
+                        document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
+                    }, 30000);
+                }
+            });
+    },
+    
+    buyUpgrade(type) {
+        let cost, levelKey, costKey;
+        
+        switch(type) {
+            case 'power':
+                cost = GameState.powerCost;
+                if (GameState.balance >= cost) {
+                    GameState.balance -= cost;
+                    GameState.powerLevel++;
+                    GameState.updateClickPower();
+                    GameState.updateCosts();
+                }
+                break;
+            case 'auto':
+                cost = GameState.autoCost;
+                if (GameState.balance >= cost) {
+                    GameState.balance -= cost;
+                    GameState.autoLevel++;
+                    GameState.updateCosts();
+                }
+                break;
+            case 'multi':
+                cost = GameState.multiCost;
+                if (GameState.balance >= cost) {
+                    GameState.balance -= cost;
+                    GameState.multiLevel++;
+                    GameState.updateMultiplier();
+                    GameState.updateCosts();
+                }
+                break;
+        }
+        
+        GameState.save();
+        this.updateUI();
+    },
+    
+    updateUI() {
+        // Баланс
+        document.getElementById('balance').textContent = this.formatNumber(GameState.balance);
+        
+        // Уровни
+        document.getElementById('powerLevel').textContent = GameState.powerLevel;
+        document.getElementById('autoLevel').textContent = GameState.autoLevel;
+        document.getElementById('multiLevel').textContent = GameState.multiLevel;
+        
+        // Стоимость
+        document.getElementById('powerCost').textContent = this.formatNumber(GameState.powerCost);
+        document.getElementById('autoCost').textContent = this.formatNumber(GameState.autoCost);
+        document.getElementById('multiCost').textContent = this.formatNumber(GameState.multiCost);
+        
+        // Множитель
+        document.getElementById('multiplierValue').textContent = GameState.multiplier;
+        
+        // Прогресс-бар
+        const progress = (GameState.multiplierProgress / GameState.multiplierGoal) * 100;
+        document.getElementById('multiplierFill').style.width = `${progress}%`;
+        
+        // Доступность кнопок
+        document.getElementById('powerBtn').disabled = GameState.balance < GameState.powerCost;
+        document.getElementById('autoBtn').disabled = GameState.balance < GameState.autoCost;
+        document.getElementById('multiBtn').disabled = GameState.balance < GameState.multiCost;
+    },
+    
+    formatNumber(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return num.toString();
     }
+};
 
-    handleReferral(launchParams);
-
-    userIdLabel.textContent = 'user_id: ' + (state.userId ?? '−');
-    updateRefLink();
-
-    // После того как есть userId — обновим лидеров
-    updateLeaderboard();
-
-    saveState();
-    renderAll();
-  } catch (e) {
-    console.error('VK init error', e);
-  }
-}
-
-// Обработка реферала по vk_ref или ?ref=
-function handleReferral(launchParams) {
-  if (!launchParams) return;
-
-  let ref = null;
-  if (launchParams.vk_ref) {
-    ref = launchParams.vk_ref;
-  }
-
-  try {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (!ref && urlParams.has('ref')) {
-      ref = urlParams.get('ref');
-    }
-  } catch (e) {}
-
-  if (ref && state.userId && String(ref) === String(state.userId)) {
-    return; // сам себя не считаем
-  }
-
-  if (ref && !state.referrerId) {
-    state.referrerId = String(ref);
-    state.balance    += REF_BALANCE_BONUS;
-    state.autoPerSec += REF_AUTO_BONUS;
-  }
-}
-
-// ====== Рендер ======
-function renderAll() {
-  balanceText.textContent    = toDisplay(state.balance);
-  clickValueText.textContent = toDisplay(state.clickValue);
-  autoPerSecText.textContent = toDisplay(state.autoPerSec);
-
-  clickLevelBadge.textContent = 'ур. ' + state.clickLevel;
-  autoLevelBadge.textContent  = 'ур. ' + state.autoLevel;
-
-  const clickCost = calcClickUpgradeCost(state.clickLevel);
-  const autoCost  = calcAutoUpgradeCost(state.autoLevel);
-  clickUpgradeCostText.textContent = toDisplay(clickCost);
-  autoUpgradeCostText.textContent  = toDisplay(autoCost);
-
-  updateAdUI();
-
-  refCountText.textContent        = String(state.refCount);
-  refBalanceBonusText.textContent = toDisplay(state.refBalanceBonus);
-  refAutoBonusText.textContent    = toDisplay(state.refAutoBonus);
-
-  clickBonusBadge.style.display = state.bonusX2Active ? 'inline-flex' : 'none';
-}
-
-function updateAdUI() {
-  if (state.bonusX2Active) {
-    adStatusText.textContent       = 'x2 активен';
-    bonusRemainingText.textContent = Math.ceil(state.bonusX2Remaining) + ' с';
-  } else {
-    bonusRemainingText.textContent = 'нет активного бонуса';
-  }
-
-  if (state.adCooldownRemaining > 0) {
-    cooldownRemainingText.textContent = Math.ceil(state.adCooldownRemaining) + ' с';
-    adButton.disabled = true;
-    adButton.style.opacity = 0.7;
-    adStatusText.textContent = 'кулдаун рекламы';
-  } else {
-    cooldownRemainingText.textContent = 'готово';
-    adButton.disabled = false;
-    adButton.style.opacity = 1;
-    if (!state.bonusX2Active) {
-      adStatusText.textContent = 'готово к показу';
-    }
-  }
-}
-
-function updateRefLink() {
-  if (!state.userId) {
-    refLinkText.textContent = 'Реферальная ссылка появится после получения user_id.';
-    return;
-  }
-  const base = window.location.origin + window.location.pathname;
-  const link = base + '?ref=' + encodeURIComponent(state.userId);
-  refLinkText.textContent = 'Твоя реферальная ссылка: ' + link;
-}
-
-// ====== Апгрейды: стоимость ======
-function calcClickUpgradeCost(level) {
-  const multiplier = Math.pow(CLICK_UPGRADE_MULTIPLIER, level - 1);
-  return Math.round(CLICK_UPGRADE_BASE_COST * multiplier);
-}
-
-function calcAutoUpgradeCost(level) {
-  const multiplier = Math.pow(AUTO_UPGRADE_MULTIPLIER, level);
-  return Math.round(AUTO_UPGRADE_BASE_COST * multiplier);
-}
-
-// ====== Игровая логика ======
-function doClick() {
-  let gain = state.clickValue;
-  if (state.bonusX2Active) {
-    gain *= 2;
-  }
-  state.balance += gain;
-  saveState();
-  renderAll();
-  updateLeaderboard();
-}
-
-function tryUpgradeClick() {
-  const cost = calcClickUpgradeCost(state.clickLevel);
-  if (state.balance < cost) {
-    showWarning('Недостаточно средств для прокачки клика');
-    return;
-  }
-  state.balance    -= cost;
-  state.clickLevel += 1;
-  state.clickValue  = Math.round(
-    INITIAL_CLICK * Math.pow(CLICK_GAIN_MULTIPLIER_PER_LEVEL, state.clickLevel - 1)
-  );
-  saveState();
-  renderAll();
-  updateLeaderboard();
-  showToast('Клик прокачан до уровня ' + state.clickLevel);
-}
-
-function tryUpgradeAuto() {
-  const cost = calcAutoUpgradeCost(state.autoLevel);
-  if (state.balance < cost) {
-    showWarning('Недостаточно средств для прокачки автомайнинга');
-    return;
-  }
-  state.balance   -= cost;
-  state.autoLevel += 1;
-  state.autoPerSec += AUTO_GAIN_PER_LEVEL;
-  saveState();
-  renderAll();
-  updateLeaderboard();
-  showToast('Автомайнинг прокачан до уровня ' + state.autoLevel);
-}
-
-function showWarning(msg) {
-  upgradeWarning.textContent = msg;
-  setTimeout(() => {
-    if (upgradeWarning.textContent === msg) {
-      upgradeWarning.textContent = '';
-    }
-  }, 2000);
-}
-
-// ====== Автомайнинг и таймеры рекламы (реальное время) ======
-let lastTickTime = Date.now();
-
-function gameLoop() {
-  const now = Date.now();
-  const deltaMs = now - lastTickTime;
-  lastTickTime = now;
-
-  const deltaSec = deltaMs / 1000;
-
-  // Автомайнинг: добавляем каждую отрисовку, баланс обновляется в реальном времени
-  if (state.autoPerSec > 0) {
-    const gainFloat = state.autoPerSec * deltaSec;
-    const gainInt   = Math.floor(gainFloat);
-    if (gainInt > 0) {
-      state.balance += gainInt;
-    }
-  }
-
-  // Таймер x2 и кулдаун
-  if (state.bonusX2Active || state.adCooldownRemaining > 0) {
-    let changed = false;
-
-    if (state.bonusX2Active) {
-      state.bonusX2Remaining -= deltaSec;
-      if (state.bonusX2Remaining <= 0) {
-        state.bonusX2Active    = false;
-        state.bonusX2Remaining = 0;
-        state.adCooldownRemaining = AD_COOLDOWN;
-        changed = true;
-      }
-    }
-
-    if (state.adCooldownRemaining > 0) {
-      state.adCooldownRemaining -= deltaSec;
-      if (state.adCooldownRemaining < 0) {
-        state.adCooldownRemaining = 0;
-      }
-      changed = true;
-    }
-
-    if (changed) {
-      saveState();
-    }
-  }
-
-  renderAll();
-  updateLeaderboard(); // обновляем топ с новым балансом
-  requestAnimationFrame(gameLoop);
-}
-
-// ====== Rewarded‑реклама: VKWebAppShowNativeAds ======
-async function showAdAndActivateBonus() {
-  if (state.adCooldownRemaining > 0 || state.bonusX2Active) {
-    return;
-  }
-  if (!window.vkBridge) {
-    showToast('VK Bridge недоступен, реклама недоступна');
-    return;
-  }
-
-  adStatusText.textContent = 'загрузка rewarded‑рекламы...';
-
-  try {
-    // Rewarded реклама: формат "reward" [web:31][web:47][web:59]
-    const data = await vkBridge.send('VKWebAppShowNativeAds', {
-      ad_format: 'reward'
-    });
-
-    if (data && data.result) {
-      activateX2Bonus();
-      showToast('Бонус x2 за клик активирован на 30 секунд!');
-    } else {
-      showToast('Реклама не была просмотрена до конца');
-    }
-  } catch (e) {
-    console.error('ShowNativeAds error', e);
-    showToast('Ошибка показа рекламы');
-  } finally {
-    renderAll();
-    saveState();
-  }
-}
-
-function activateX2Bonus() {
-  state.bonusX2Active    = true;
-  state.bonusX2Remaining = AD_BONUS_DURATION;
-  state.adCooldownRemaining = 0;
-  saveState();
-  renderAll();
-}
-
-// ====== Toast ======
-let toastTimeout = null;
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add('show');
-  if (toastTimeout) {
-    clearTimeout(toastTimeout);
-  }
-  toastTimeout = setTimeout(() => {
-    toast.classList.remove('show');
-  }, 2000);
-}
-
-// ====== Табы ======
-tabButtons.forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    tabButtons.forEach(b => b.classList.remove('active'));
-    tabContents.forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + tab).classList.add('active');
-
-    if (tab === 'top') {
-      renderTopTable();
-    }
-  });
+// ==================== ЗАПУСК ====================
+document.addEventListener('DOMContentLoaded', ()
+  => {
+    GameController.init();
 });
-
-// ====== Лидерборд через db.js ======
-function updateLeaderboard() {
-  if (!state.userId || typeof db === 'undefined') return;
-  const list = db.upsertUser(state.userId, state.balance);
-  // Перерисуем таблицу, если вкладка "Топ" открыта
-  const topTab = document.getElementById('tab-top');
-  if (topTab.classList.contains('active')) {
-    renderTopTable(list);
-  }
-}
-
-function renderTopTable(listOpt) {
-  if (typeof db === 'undefined') return;
-  const list = listOpt || db.loadLeaderboard();
-
-  topTableBody.innerHTML = '';
-  list.slice(0, 100).forEach((item, idx) => {
-    const tr = document.createElement('tr');
-    const tdPos = document.createElement('td');
-    const tdId  = document.createElement('td');
-    const tdBal = document.createElement('td');
-
-    tdPos.textContent = String(idx + 1);
-    tdId.textContent  = item.userId;
-    tdBal.textContent = toDisplay(item.balance);
-
-    tr.appendChild(tdPos);
-    tr.appendChild(tdId);
-    tr.appendChild(tdBal);
-
-    topTableBody.appendChild(tr);
-  });
-}
-
-// ====== Слушатели ======
-clickButton.addEventListener('click', () => {
-  doClick();
-});
-
-upgradeClickBtn.addEventListener('click', () => {
-  tryUpgradeClick();
-});
-
-upgradeAutoBtn.addEventListener('click', () => {
-  tryUpgradeAuto();
-});
-
-adButton.addEventListener('click', () => {
-  showAdAndActivateBonus();
-});
-
-// ====== Инициализация ======
-loadState();
-renderAll();
-renderTopTable();
-requestAnimationFrame(gameLoop);
-initVK();
