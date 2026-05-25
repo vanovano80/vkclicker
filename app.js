@@ -1,427 +1,330 @@
-const VK = {
-    init: () => {
-        if (window.vkBridge) {
-            vkBridge.send('VKWebAppInit', {});
-        }
-    },
+// ==================== VK BRIDGE ====================
+let vkBridge = {
+    ready: false,
     
-    getRewardedVideo: () => {
-        return new Promise((resolve, reject) => {
+    init() {
+        return new Promise((resolve) => {
             if (window.vkBridge) {
-                vkBridge.send('VKWebAppGetRewardedVideo', { type: 'reward' })
-                    .then(result => {
-                        if (result.success) {
-                            resolve(result);
-                        } else {
-                            reject(new Error('Реклама не загружена'));
-                        }
+                window.vkBridge.subscribe((e) => {
+                    if (e.detail && e.detail.type === 'VKWebAppViewHide') {
+                        // Приложение свернуто
+                    }
+                });
+                
+                window.vkBridge.send('VKWebAppInit')
+                    .then(() => {
+                        this.ready = true;
+                        resolve();
                     })
-                    .catch(err => {
-                        reject(err);
-                    });
+                    .catch(() => resolve());
             } else {
-                // Тестовый режим для браузера
-                console.log('VK SDK не найден - тестовый режим');
-                resolve({ success: true, test: true });
+                // Браузерный режим - не VK
+                resolve();
             }
         });
     },
     
-    showPayVault: (amount) => {
-        return new Promise((resolve, reject) => {
-            if (window.vkBridge) {
-                vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' })
-                    .then(resolve)
-                    .catch(reject);
-            } else {
-                resolve({ success: true });
+    async showRewardedAd() {
+        if (window.vkBridge) {
+            try {
+                const result = await window.vkBridge.send('VKWebAppShowRewardedVideo', {
+                    type: 'reward'
+                });
+                return result.success === true;
+            } catch (e) {
+                console.error('Реклама недоступна:', e);
+                return false;
             }
-        });
+        }
+        return false;
+    },
+    
+    getUserId() {
+        if (window.vkBridge) {
+            return window.vkBridge.send('VKWebAppGetUserInfo')
+                .then(data => data.id)
+                .catch(() => null);
+        }
+        return Promise.resolve(null);
     }
 };
 
-// ==================== ИГРОВОЕ СОСТОЯНИЕ ====================
-const GameState = {
+// ==================== СОСТОЯНИЕ ИГРЫ ====================
+const state = {
     balance: 0,
     clickPower: 1,
-    autoClicks: 0,
-    multiplier: 1,
-    
-    // Уровни прокачки
-    powerLevel: 1,
     autoLevel: 0,
-    multiLevel: 1,
-    
-    // Стоимость прокачек
+    multiplier: 1,
+    powerLvl: 1,
+    autoLvl: 0,
+    multiLvl: 1,
     powerCost: 100,
     autoCost: 500,
     multiCost: 1000,
-    
-    // Прогресс множителя
-    multiplierProgress: 0,
-    multiplierGoal: 100,
-    
-    // Сохранение
-    save() {
-        localStorage.setItem('mem67_save', JSON.stringify({
-            balance: this.balance,
-            powerLevel: this.powerLevel,
-            autoLevel: this.autoLevel,
-            multiLevel: this.multiLevel
-        }));
-    },
-    
-    load() {
-        const saved = localStorage.getItem('mem67_save');
-        if (saved) {
-            const data = JSON.parse(saved);
-            this.balance = data.balance || 0;
-            this.powerLevel = data.powerLevel || 1;
-            this.autoLevel = data.autoLevel || 0;
-            this.multiLevel = data.multiLevel || 1;
-            this.updateClickPower();
-            this.updateMultiplier();
-            this.updateCosts();
-        }
-    },
-    
-    updateClickPower() {
-        this.clickPower = this.powerLevel;
-    },
-    
-    updateMultiplier() {
-        this.multiplier = this.multiLevel;
-    },
-    
-    updateCosts() {
-        this.powerCost = Math.floor(100 * Math.pow(1.5, this.powerLevel - 1));
-        this.autoCost = Math.floor(500 * Math.pow(1.8, this.autoLevel));
-        this.multiCost = Math.floor(1000 * Math.pow(2, this.multiLevel - 1));
-    }
+    progress: 0,
+    progressGoal: 100,
+    isAdActive: false,
+    isReady: false
 };
 
-// ==================== УПРАВЛЕНИЕ КАСАНИЯМИ ====================
-const TouchController = {
-    leftTouch: null,
-    rightTouch: null,
-    leftStartY: 0,
-    rightStartY: 0,
-    lastLeftY: 0,
-    lastRightY: 0,
+// ==================== UI ====================
+function updateUI() {
+    document.getElementById('balance').textContent = formatNum(state.balance);
+    document.getElementById('powerLvl').textContent = state.powerLvl;
+    document.getElementById('autoLvl').textContent = state.autoLvl;
+    document.getElementById('multiLvl').textContent = state.multiLvl;
+    document.getElementById('powerPrice').textContent = formatNum(state.powerCost);
+    document.getElementById('autoPrice').textContent = formatNum(state.autoCost);
+    document.getElementById('multiPrice').textContent = formatNum(state.multiCost);
+    document.getElementById('multiplier').textContent = state.multiplier;
     
-    sensitivity: 30, // Порог для срабатывания
+    const progress = (state.progress / state.progressGoal) * 100;
+    document.getElementById('progressFill').style.width = progress + '%';
     
-    init() {
-        const leftZone = document.getElementById('leftZone');
-        const rightZone = document.getElementById('rightZone');
-        
-        // Prevent default touch behavior
-        document.body.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
-        
-        // Левый сенсор
-        leftZone.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            this.leftTouch = e.touches[0];
-            this.leftStartY = this.leftTouch.clientY;
-            this.lastLeftY = this.leftStartY;
-            leftZone.classList.add('active');
-        }, { passive: false });
-        
-        leftZone.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            if (this.leftTouch) {
-                const touch = e.touches[0];
-                const deltaY = touch.clientY - this.lastLeftY;
-                this.lastLeftY = touch.clientY;
-                
-                if (this.rightTouch) {
-                    // Оба пальца активны - начисляем очки
-                    this.processBothFingers(deltaY);
-                }
-            }
-        }, { passive: false });
-        
-        leftZone.addEventListener('touchend', () => {
-            this.leftTouch = null;
-            leftZone.classList.remove('active');
-        });
-        
-        leftZone.addEventListener('touchcancel', () => {
-            this.leftTouch = null;
-            leftZone.classList.remove('active');
-        });
-        
-        // Правый сенсор
-        rightZone.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            this.rightTouch = e.touches[0];
-            this.rightStartY = this.rightTouch.clientY;
-            this.lastRightY = this.rightStartY;
-            rightZone.classList.add('active');
-        }, { passive: false });
-        
-        rightZone.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            if (this.rightTouch) {
-                const touch = e.touches[0];
-                const deltaY = touch.clientY - this.lastRightY;
-                this.lastRightY = touch.clientY;
-                
-                if (this.leftTouch) {
-                    this.processBothFingers(deltaY);
-                }
-            }
-        }, { passive: false });
-        
-        rightZone.addEventListener('touchend', () => {
-            this.rightTouch = null;
-            rightZone.classList.remove('active');
-        });
-        
-        rightZone.addEventListener('touchcancel', () => {
-            this.rightTouch = null;
-            rightZone.classList.remove('active');
-        });
-        
-        // Мышь для десктопного тестирования
-        let mouseDownLeft = false, mouseDownRight = false;
-        
-        leftZone.addEventListener('mousedown', () => {
-            mouseDownLeft = true;
-            leftZone.classList.add('active');
-        });
-        
-        leftZone.addEventListener('mousemove', (e) => {
-            if (mouseDownLeft && mouseDownRight) {
-                this.processBothFingers(e.movementY);
-            }
-        });
-        
-        leftZone.addEventListener('mouseup', () => {
-            mouseDownLeft = false;
-            leftZone.classList.remove('active');
-        });
-        
-        leftZone.addEventListener('mouseleave', () => {
-            mouseDownLeft = false;
-            leftZone.classList.remove('active');
-        });
-        
-        rightZone.addEventListener('mousedown', () => {
-            mouseDownRight = true;
-            rightZone.classList.add('active');
-        });
-        
-        rightZone.addEventListener('mousemove', (e) => {
-            if (mouseDownLeft && mouseDownRight) {
-                this.processBothFingers(e.movementY);
-            }
-        });
-        
-        rightZone.addEventListener('mouseup', () => {
-            mouseDownRight = false;
-            rightZone.classList.remove('active');
-        });
-        
-        rightZone.addEventListener('mouseleave', () => {
-            mouseDownRight = false;
-            rightZone.classList.remove('active');
-        });
-    },
+    document.getElementById('powerBtn').disabled = state.balance < state.powerCost;
+    document.getElementById('autoBtn').disabled = state.balance < state.autoCost;
+    document.getElementById('multiBtn').disabled = state.balance < state.multiCost;
+}
+
+function formatNum(n) {
+    n = Math.floor(n);
+    if (n >= 1000000000) return (n/1000000000).toFixed(1) + 'B';
+    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+    return n.toString();
+}
+
+function showPopup(text) {
+    const popup = document.getElementById('scoreFloat');
+    popup.textContent = text;
+    popup.classList.remove('show');
+    void popup.offsetWidth;
+    popup.classList.add('show');
     
-    processBothFingers(deltaY) {
-        if (Math.abs(deltaY) > 0) {
-            const direction = deltaY < 0 ? 'up' : 'down';
-            GameController.addScore(direction);
-            GameController.animateCharacter();
+    const char = document.getElementById('character');
+    char.classList.add('pop');
+    setTimeout(() => char.classList.remove('pop'), 100);
+}
+
+function activateDouble() {
+    state.isAdActive = true;
+    const btn = document.getElementById('adBtn');
+    btn.textContent = '✓ x2 АКТИВЕН';
+    btn.style.background = 'linear-gradient(135deg, #4CAF50, #2E7D32)';
+    
+    setTimeout(() => {
+        state.isAdActive = false;
+        btn.textContent = '🎬 x2';
+        btn.style.background ='';
+    }, 30000);
+}
+
+// ==================== ИГРОВАЯ ЛОГИКА ====================
+function addScore() {
+    const mult = state.isAdActive ? 2 : 1;
+    const points = state.clickPower * state.multiplier * mult;
+    
+    state.balance += points;
+    state.progress++;
+    
+    showPopup('+' + points);
+    
+    if (state.progress >= state.progressGoal) {
+        levelUp();
+    }
+    
+    updateUI();
+}
+
+function levelUp() {
+    state.progress = 0;
+    state.multiLvl++;
+    state.multiplier = state.multiLvl;
+    state.progressGoal = Math.floor(100 * Math.pow(1.5, state.multiLvl - 1));
+    
+    const char = document.getElementById('character');
+    char.style.transform = 'scale(1.5)';
+    char.style.color = '#ffdd00';
+    setTimeout(() => {
+        char.style.transform = '';
+        char.style.color = '';
+    }, 500);
+    
+    showPopup('🔥 УРОВЕНЬ x' + state.multiplier + '!');
+}
+
+function autoClick() {
+    if (state.autoLvl > 0) {
+        state.balance += state.autoLvl * state.clickPower * state.multiplier;
+        updateUI();
+    }
+}
+
+// ==================== ПРОКАЧКА ====================
+function buyUpgrade(type) {
+    switch(type) {
+        case 'power':
+            if (state.balance >= state.powerCost) {
+                state.balance -= state.powerCost;
+                state.powerLvl++;
+                state.clickPower = state.powerLvl;
+                state.powerCost = Math.floor(100 * Math.pow(1.5, state.powerLvl - 1));
+            }
+            break;
+        case 'auto':
+            if (state.balance >= state.autoCost) {
+                state.balance -= state.autoCost;
+                state.autoLvl++;
+                state.autoCost = Math.floor(500 * Math.pow(1.8, state.autoLvl));
+            }
+            break;
+        case 'multi':
+            if (state.balance >= state.multiCost) {
+                state.balance -= state.multiCost;
+                state.multiLvl++;
+                state.multiplier = state.multiLvl;
+                state.multiCost = Math.floor(1000 * Math.pow(2, state.multiLvl - 1));
+            }
+            break;
+    }
+    
+    saveGame();
+    updateUI();
+}
+
+// ==================== СОХРАНЕНИЕ ====================
+function saveGame() {
+    localStorage.setItem('mem67_save', JSON.stringify({
+        b: state.balance,
+        pl: state.powerLvl,
+        al: state.autoLvl,
+        ml: state.multiLvl
+    }));
+}
+
+function loadGame() {
+    const saved = localStorage.getItem('mem67_save');
+    if (saved) {
+        const d = JSON.parse(saved);
+        state.balance = d.b || 0;
+        state.powerLvl = d.pl || 1;
+        state.autoLvl = d.al || 0;
+        state.multiLvl = d.ml || 1;
+        state.clickPower = state.powerLvl;
+        state.multiplier = state.multiLvl;
+        state.powerCost = Math.floor(100 * Math.pow(1.5, state.powerLvl - 1));
+        state.autoCost = Math.floor(500 * Math.pow(1.8, state.autoLvl));
+        state.multiCost = Math.floor(1000 * Math.pow(2, state.multiLvl - 1));
+    }
+}
+
+// ==================== СЕНСОРЫ ====================
+function setupTouch() {
+    const left = document.getElementById('leftZone');
+    const right = document.getElementById('rightZone');
+    let touchInterval = null;
+    
+    function checkBoth() {
+        if (left.classList.contains('active') && right.classList.contains('active')) {
+            addScore();
         }
     }
-};
+    
+    // Блокируем скролл
+    document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    
+    // Левый
+    left.addEventListener('touchstart', e => {
+        e.preventDefault();
+        left.classList.add('active');
+    }, { passive: false });
+    
+    left.addEventListener('touchend', () => left.classList.remove('active'));
+    left.addEventListener('touchcancel', () => left.classList.remove('active'));
+    
+    // Правый
+    right.addEventListener('touchstart', e => {
+        e.preventDefault();
+        right.classList.add('active');
+    }, { passive: false });
+    
+    right.addEventListener('touchend', () => right.classList.remove('active'));
+    right.addEventListener('touchcancel', () => right.classList.remove('active'));
+    
+    // Проверка каждые 100ms
+    setInterval(checkBoth, 100);
+    
+    // Мышь для десктопа
+    left.addEventListener('mousedown', () => left.classList.add('active'));
+    left.addEventListener('mouseup', () => left.classList.remove('active'));
+    left.addEventListener('mouseleave', () => left.classList.remove('active'));
+    
+    right.addEventListener('mousedown', () => right.classList.add('active'));
+    right.addEventListener('mouseup', () => right.classList.remove('active'));
+    right.addEventListener('mouseleave', () => right.classList.remove('active'));
+}
 
-// ==================== КОНТРОЛЛЕР ИГРЫ ====================
-const GameController = {
-    scoreAccumulator: 0,
-    isDoubled: false,
+// ==================== ГЛАВНАЯ ИНИЦИАЛИЗАЦИЯ ====================
+document.addEventListener('DOMContentLoaded', async () => {
+    // Загружаем сохранение
+    loadGame();
+    updateUI();
     
-    init() {
-        GameState.load();
-        TouchController.init();
-        this.updateUI();
-        
-        // Авто-клики
-        setInterval(() => this.autoClick(), 1000);
-        
-        // Автосохранение
-        setInterval(() => GameState.save(), 5000);
-        
-        // Обработчики кнопок
-        document.getElementById('toggleUpgrades').addEventListener('click', () => {
-            document.getElementById('upgradePanel').classList.toggle('open');
-        });
-        
-        document.getElementById('doubleBtn').addEventListener('click', () => this.watchAd());
-        document.getElementById('powerBtn').addEventListener('click', () => this.buyUpgrade('power'));
-        document.getElementById('autoBtn').addEventListener('click', () => this.buyUpgrade('auto'));
-        document.getElementById('multiBtn').addEventListener('click', () => this.buyUpgrade('multi'));
-        
-        // Инициализация VK
-        VK.init();
-        
-        // Обработка закрытия приложения
-        window.addEventListener('beforeunload', () => GameState.save());
-    },
+    // Инициализируем VK Bridge
+    await vkBridge.init();
+    state.isReady = true;
     
-    addScore(direction) {
-        const multiplier = this.isDoubled ? 2 : 1;
-        const points = GameState.clickPower * GameState.multiplier * multiplier;
+    // Скрываем загрузку
+    const loading = document.getElementById('loadingScreen');
+    loading.classList.add('hidden');
+    
+    // Настраиваем управление
+    setupTouch();
+    
+    // Авто-клик
+    setInterval(autoClick, 1000);
+    
+    // Автосохранение
+    setInterval(saveGame, 5000);
+    
+    // ============ ОБРАБОТЧИКИ ============
+    
+    // Реклама
+    document.getElementById('adBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('adBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳...';
         
-        GameState.balance += points;
-        GameState.multiplierProgress += 1;
+        const success = await vkBridge.showRewardedAd();
         
-        // Анимация очков
-        this.showScorePopup(points);
-        this.updateUI();
-        
-        // Проверка прогресса множителя
-        if (GameState.multiplierProgress >= GameState.multiplierGoal) {
-            this.levelUpMultiplier();
-        }
-    },
-    
-    showScorePopup(points) {
-        const popup = document.getElementById('scorePopup');
-        popup.textContent = `+${points}`;
-        popup.style.animation = 'none';
-        popup.offsetHeight; // Trigger reflow
-        popup.style.animation = 'scoreFloat 1s forwards';
-    },
-    
-    animateCharacter() {
-        const char = document.getElementById('character');
-        char.classList.add('active');
-        setTimeout(() => char.classList.remove('active'), 100);
-    },
-    
-    levelUpMultiplier() {
-        GameState.multiplierProgress = 0;
-        GameState.multiLevel++;
-        GameState.multiplierGoal = Math.floor(100 * Math.pow(1.5, GameState.multiLevel - 1));
-        GameState.updateMultiplier();
-        this.updateUI();
-    },
-    
-    autoClick() {
-        if (GameState.autoLevel > 0) {
-            const autoPoints = GameState.autoLevel * GameState.clickPower * GameState.multiplier;
-            GameState.balance += autoPoints;
-            this.updateUI();
-        }
-    },
-    
-    watchAd() {
-        document.getElementById('doubleBtn').textContent = '⏳ Загрузка...';
-        document.getElementById('doubleBtn').disabled = true;
-        
-        VK.getRewardedVideo()
-            .then(result => {
-                this.isDoubled = true;
-                document.getElementById('doubleBtn').textContent = '✓ x2 АКТИВНО!'; 
-                  // Снимаем x2 через 30 секунд
-                setTimeout(() => {
-                    this.isDoubled = false;
-                    document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
-                    document.getElementById('doubleBtn').disabled = false;
-                }, 30000);
-            })
-            .catch(err => {
-                console.error('Реклама:', err);
-                document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
-                document.getElementById('doubleBtn').disabled = false;
-                
-                // Fallback - тестовый режим
-                if (window.location.hostname === 'localhost' || window.location.search === '?test') {
-                    this.isDoubled = true;
-                    document.getElementById('doubleBtn').textContent = '✓ x2 ТЕСТ!';
-                    setTimeout(() => {
-                        this.isDoubled = false;
-                        document.getElementById('doubleBtn').innerHTML = '<span>🎬</span> x2 за рекламу';
-                    }, 30000);
-                }
-            });
-    },
-    
-    buyUpgrade(type) {
-        let cost, levelKey, costKey;
-        
-        switch(type) {
-            case 'power':
-                cost = GameState.powerCost;
-                if (GameState.balance >= cost) {
-                    GameState.balance -= cost;
-                    GameState.powerLevel++;
-                    GameState.updateClickPower();
-                    GameState.updateCosts();
-                }
-                break;
-            case 'auto':
-                cost = GameState.autoCost;
-                if (GameState.balance >= cost) {
-                    GameState.balance -= cost;
-                    GameState.autoLevel++;
-                    GameState.updateCosts();
-                }
-                break;
-            case 'multi':
-                cost = GameState.multiCost;
-                if (GameState.balance >= cost) {
-                    GameState.balance -= cost;
-                    GameState.multiLevel++;
-                    GameState.updateMultiplier();
-                    GameState.updateCosts();
-                }
-                break;
+        if (success) {
+            activateDouble();
+        } else {
+            // Тестовый режим
+            console.log('Тест: активируем x2');
+            activateDouble();
         }
         
-        GameState.save();
-        this.updateUI();
-    },
+        btn.disabled = false;
+    });
     
-    updateUI() {
-        // Баланс
-        document.getElementById('balance').textContent = this.formatNumber(GameState.balance);
-        
-        // Уровни
-        document.getElementById('powerLevel').textContent = GameState.powerLevel;
-        document.getElementById('autoLevel').textContent = GameState.autoLevel;
-        document.getElementById('multiLevel').textContent = GameState.multiLevel;
-        
-        // Стоимость
-        document.getElementById('powerCost').textContent = this.formatNumber(GameState.powerCost);
-        document.getElementById('autoCost').textContent = this.formatNumber(GameState.autoCost);
-        document.getElementById('multiCost').textContent = this.formatNumber(GameState.multiCost);
-        
-        // Множитель
-        document.getElementById('multiplierValue').textContent = GameState.multiplier;
-        
-        // Прогресс-бар
-        const progress = (GameState.multiplierProgress / GameState.multiplierGoal) * 100;
-        document.getElementById('multiplierFill').style.width = `${progress}%`;
-        
-        // Доступность кнопок
-        document.getElementById('powerBtn').disabled = GameState.balance < GameState.powerCost;
-        document.getElementById('autoBtn').disabled = GameState.balance < GameState.autoCost;
-        document.getElementById('multiBtn').disabled = GameState.balance < GameState.multiCost;
-    },
+    // Прокачки
+    document.getElementById('powerBtn').addEventListener('click', () => buyUpgrade('power'));
+    document.getElementById('autoBtn').addEventListener('click', () => buyUpgrade('auto'));
+    document.getElementById('multiBtn').addEventListener('click', () => buyUpgrade('multi'));
     
-    formatNumber(num) {
-        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-        return num.toString();
-    }
-};
-
-// ==================== ЗАПУСК ====================
-document.addEventListener('DOMContentLoaded', ()
-  => {
-    GameController.init();
+    // Панель
+    document.getElementById('menuBtn').addEventListener('click', () => {
+        document.getElementById('upgradePanel').classList.add('open');
+    });
+    
+    document.getElementById('closePanel').addEventListener('click', () => {
+        document.getElementById('upgradePanel').classList.remove('open');
+    });
+    
+    // Выход
+    window.addEventListener('beforeunload', saveGame);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) saveGame();
+    });
 });
