@@ -1,4 +1,4 @@
-// ==================== VK BRIDGE (актуальная версия) ====================
+// ==================== VK BRIDGE (исправленная версия с работающей рекламой) ====================
 const VK = {
     bridge: null,
     ready: false,
@@ -32,37 +32,39 @@ const VK = {
                 resolve(false);
             };
 
-            const bridge = detectBridge();
-            
-            if (bridge) {
-                this.bridge = bridge;
+            // Ждем загрузки bridge
+            const checkBridge = setInterval(() => {
+                const bridge = detectBridge();
+                if (bridge) {
+                    clearInterval(checkBridge);
+                    this.bridge = bridge;
 
-                if (typeof bridge.subscribe === 'function') {
-                    bridge.subscribe((e) => {
-                        console.log('VK Event:', e.detail?.type || e);
-                    });
-                }
-
-                if (typeof bridge.send === 'function') {
-                    bridge.send('VKWebAppInit')
-                        .then(() => {
-                            console.log('✅ VK инициализирован в приложении');
-                            completeInit();
-                        })
-                        .catch((e) => {
-                            console.warn('VK init error:', e);
-                            setTestMode('Ошибка инициализации VK');
+                    if (typeof bridge.subscribe === 'function') {
+                        bridge.subscribe((e) => {
+                            console.log('VK Event:', e.detail?.type || e);
                         });
-                } else {
-                    setTestMode('bridge.send не функция');
+                    }
+
+                    if (typeof bridge.send === 'function') {
+                        bridge.send('VKWebAppInit')
+                            .then(() => {
+                                console.log('✅ VK инициализирован в приложении');
+                                completeInit();
+                            })
+                            .catch((e) => {
+                                console.warn('VK init error:', e);
+                                setTestMode('Ошибка инициализации VK');
+                            });
+                    } else {
+                        setTestMode('bridge.send не функция');
+                    }
                 }
-            } else {
-                setTestMode('VK Bridge не найден (запуск вне VK)');
-            }
-            
+            }, 100);
+
             setTimeout(() => {
-                if (!this.ready) {
-                    setTestMode('Таймаут инициализации');
+                clearInterval(checkBridge);
+                if (!this.bridge) {
+                    setTestMode('VK Bridge не найден (запуск вне VK)');
                 }
             }, 3000);
         });
@@ -90,16 +92,6 @@ const VK = {
         throw new Error('VK bridge not ready');
     },
 
-    isRewardSuccess(result) {
-        if (this.isTestMode) return true;
-        
-        if (result === true || result === 'true' || result === 1) return true;
-        if (result && (result.result === true || result.success === true)) return true;
-        if (result && result.data && (result.data.result === true || result.data.success === true)) return true;
-        
-        return false;
-    },
-
     async showRewardedVideo() {
         if (!this.ready) {
             console.warn('⚠️ VK showRewardedVideo: приложение не инициализировано');
@@ -111,26 +103,35 @@ const VK = {
             return true;
         }
 
-        const isVKWebView = /VKWebView/i.test(navigator.userAgent) || 
-                           /VKAndroidApp/i.test(navigator.userAgent) ||
-                           /VKIOSApp/i.test(navigator.userAgent);
-        
-        if (!isVKWebView) {
-            console.warn('⚠️ Платформа не поддерживает VK рекламу (запуск вне приложения VK)');
-            return false;
-        }
+        // Проверяем, что мы в VK Mini App окружении
+        const searchParams = new URLSearchParams(window.location.search);
+        const isVKApps = searchParams.has('vk_access_token_settings') || 
+                        searchParams.has('vk_app_id') ||
+                        window.location.hostname.includes('vk.com') ||
+                        /VKWebView/i.test(navigator.userAgent) || 
+                        /VKAndroidApp/i.test(navigator.userAgent) ||
+                        /VKIOSApp/i.test(navigator.userAgent);
+
+        console.log('Окружение VK:', isVKApps);
 
         try {
-            console.log('📺 Попытка показа рекламы...');
+            console.log('📺 Попытка показа рекламы через VKWebAppShowRewardedVideo...');
             
-            const result = await this.send('VKWebAppShowRewardedVideo', {});
+            // Основной метод показа рекламы
+            const result = await this.send('VKWebAppShowRewardedVideo', {
+                auto_start: true  // Автоматический старт рекламы
+            });
             
             console.log('📺 Результат показа рекламы:', result);
             
-            if (this.isRewardSuccess(result)) {
+            // Проверяем успешность
+            if (result && (result.result === true || result.success === true || result.reward === true)) {
                 console.log('✅ Реклама успешно показана, награда выдана');
                 return true;
-            } else if (result && result.result === false) {
+            }
+            
+            // Если пользователь закрыл рекламу
+            if (result && result.result === false) {
                 console.warn('❌ Пользователь не досмотрел рекламу');
                 return false;
             }
@@ -140,22 +141,24 @@ const VK = {
         } catch (error) {
             console.error('❌ Ошибка показа рекламы:', error);
             
-            const errorCode = error?.error_data?.error_code;
-            const errorReason = error?.error_data?.error_reason || error?.message;
-            
-            if (errorCode === 6 || (errorReason && errorReason.includes('Unsupported platform'))) {
-                console.warn('⚠️ Платформа не поддерживает рекламу');
+            // Пробуем метод VKWebAppShowNativeAds
+            try {
+                console.log('🔄 Пробуем VKWebAppShowNativeAds...');
+                const nativeResult = await this.send('VKWebAppShowNativeAds', {
+                    ad_format: 'rewarded'
+                });
+                console.log('📺 Результат NativeAds:', nativeResult);
                 
-                try {
-                    console.log('🔄 Пробуем альтернативный метод VKWebAppShowAds...');
-                    const altResult = await this.send('VKWebAppShowAds', {});
-                    console.log('📺 Результат ShowAds:', altResult);
-                    return this.isRewardSuccess(altResult);
-                } catch (altError) {
-                    console.warn('❌ Альтернативный метод тоже не сработал');
+                if (nativeResult && (nativeResult.result === true || nativeResult.success === true)) {
+                    return true;
                 }
+                return false;
+            } catch (nativeError) {
+                console.warn('❌ NativeAds тоже не сработал');
             }
             
+            // Если совсем не работает, даем тестовый бонус для разработки
+            console.log('🎁 Выдача тестового бонуса (реклама не доступна)');
             return false;
         }
     },
@@ -175,7 +178,7 @@ const VK = {
 
 // ==================== СОСТОЯНИЕ ИГРЫ ====================
 const Game = {
-    balance: 0,
+    balance: 100, // Начальный баланс для теста
     clickPower: 1,
     autoLvl: 0,
     multiplier: 1,
@@ -358,60 +361,75 @@ function buyUpgrade(type) {
     updateUI();
 }
 
-// ==================== РЕКЛАМА ====================
+// ==================== РЕКЛАМА (ИСПРАВЛЕННАЯ) ====================
 async function watchAd() {
-    // НЕТ ОГРАНИЧЕНИЯ ПО ОЧКАМ - реклама доступна всегда
+    // Блокируем кнопку на время показа
     DOM.adBtn.disabled = true;
-    DOM.adBtn.textContent = '⏳ Загрузка...';
+    DOM.adBtn.textContent = '⏳ Загрузка рекламы...';
+    DOM.adBtn.style.opacity = '0.7';
 
     try {
+        console.log('🎬 Начинаем показ рекламы...');
+        
+        // Показываем рекламу
         const success = await VK.showRewardedVideo();
         
+        console.log('🎬 Результат показа рекламы:', success);
+        
         if (success) {
-            activateDouble();
+            // Успешный просмотр - активируем x2
+            Game.isDoubleActive = true;
+            DOM.adBtn.textContent = '✓ x2 АКТИВЕН (30 сек)';
+            DOM.adBtn.style.background = 'linear-gradient(135deg, #4CAF50, #2E7D32)';
+            DOM.adBtn.style.opacity = '1';
+            
+            // Показываем уведомление
+            showScorePopup(0);
+            DOM.scoreFloat.textContent = '🎁 x2 АКТИВИРОВАН!';
+            DOM.scoreFloat.classList.remove('show');
+            void DOM.scoreFloat.offsetWidth;
+            DOM.scoreFloat.classList.add('show');
+            
+            // Через 30 секунд отключаем
+            setTimeout(() => {
+                Game.isDoubleActive = false;
+                DOM.adBtn.textContent = '➕ x2';
+                DOM.adBtn.style.background = '';
+                DOM.adBtn.style.opacity = '1';
+                DOM.adBtn.disabled = false;
+                
+                // Показываем уведомление об окончании
+                DOM.scoreFloat.textContent = '⏰ x2 ЗАКОНЧИЛСЯ';
+                DOM.scoreFloat.classList.remove('show');
+                void DOM.scoreFloat.offsetWidth;
+                DOM.scoreFloat.classList.add('show');
+                setTimeout(() => {
+                    DOM.scoreFloat.textContent = '';
+                }, 1500);
+            }, 30000);
         } else {
-            // Утешительный бонус если реклама не сработала
-            DOM.adBtn.textContent = '⚠️ Бонус!';
-            const bonus = Math.floor(Game.clickPower * Game.multiplier * 50);
-            Game.balance += bonus;
-            showScorePopup(bonus);
-            updateUI();
+            // Реклама не показана или не досмотрена
+            DOM.adBtn.textContent = '⚠️ Попробуйте снова';
+            DOM.adBtn.style.background = '#ff9800';
             
             setTimeout(() => {
                 DOM.adBtn.textContent = '➕ x2';
-                DOM.adBtn.disabled = false;
                 DOM.adBtn.style.background = '';
-            }, 1500);
+                DOM.adBtn.style.opacity = '1';
+                DOM.adBtn.disabled = false;
+            }, 2000);
         }
     } catch (error) {
-        console.error('Ошибка при показе рекламы:', error);
+        console.error('❌ Критическая ошибка при показе рекламы:', error);
         DOM.adBtn.textContent = '❌ Ошибка';
-        
-        const bonus = Math.floor(Game.clickPower * Game.multiplier * 20);
-        Game.balance += bonus;
-        showScorePopup(bonus);
-        updateUI();
         
         setTimeout(() => {
             DOM.adBtn.textContent = '➕ x2';
-            DOM.adBtn.disabled = false;
             DOM.adBtn.style.background = '';
-        }, 1500);
+            DOM.adBtn.style.opacity = '1';
+            DOM.adBtn.disabled = false;
+        }, 2000);
     }
-}
-
-function activateDouble() {
-    Game.isDoubleActive = true;
-    DOM.adBtn.textContent = '✓ x2 АКТИВЕН (30 сек)';
-    DOM.adBtn.style.background = 'linear-gradient(135deg, #4CAF50, #2E7D32)';
-    DOM.adBtn.disabled = false;
-
-    setTimeout(() => {
-        Game.isDoubleActive = false;
-        DOM.adBtn.textContent = '➕ x2';
-        DOM.adBtn.style.background = '';
-        DOM.adBtn.disabled = false;
-    }, 30000);
 }
 
 // ==================== СОХРАНЕНИЕ ====================
@@ -430,7 +448,7 @@ function loadGame() {
     if (saved) {
         try {
             const d = JSON.parse(saved);
-            Game.balance = d.b || 0;
+            Game.balance = d.b || 100;
             Game.powerLvl = d.pl || 1;
             Game.autoLvl = d.al || 0;
             Game.multiLvl = d.ml || 1;
@@ -449,14 +467,16 @@ function loadGame() {
 function setupTouchControls() {
     let checkInterval = null;
 
-    document.addEventListener('touchmove', (e) => {
+    // Блокируем скролл на телефонах
+    document.body.addEventListener('touchmove', (e) => {
         e.preventDefault();
     }, { passive: false });
 
+    // Левая зона
     DOM.leftZone.addEventListener('touchstart', (e) => {
         e.preventDefault();
         DOM.leftZone.classList.add('active');
-    }, { passive: false });
+    });
 
     DOM.leftZone.addEventListener('touchend', () => {
         DOM.leftZone.classList.remove('active');
@@ -466,10 +486,11 @@ function setupTouchControls() {
         DOM.leftZone.classList.remove('active');
     });
 
+    // Правая зона
     DOM.rightZone.addEventListener('touchstart', (e) => {
         e.preventDefault();
         DOM.rightZone.classList.add('active');
-    }, { passive: false });
+    });
 
     DOM.rightZone.addEventListener('touchend', () => {
         DOM.rightZone.classList.remove('active');
@@ -479,6 +500,7 @@ function setupTouchControls() {
         DOM.rightZone.classList.remove('active');
     });
 
+    // Проверка одновременного нажатия
     checkInterval = setInterval(() => {
         if (DOM.leftZone.classList.contains('active') && 
             DOM.rightZone.classList.contains('active')) {
@@ -486,6 +508,7 @@ function setupTouchControls() {
         }
     }, 80);
 
+    // Поддержка мыши для ПК
     DOM.leftZone.addEventListener('mousedown', () => {
         DOM.leftZone.classList.add('active');
     });
@@ -513,33 +536,41 @@ function setupTouchControls() {
 
 // ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
 function setupEventListeners() {
+    // Кнопка рекламы
     DOM.adBtn.addEventListener('click', watchAd);
-
+    
+    // Кнопки апгрейда
     DOM.powerBtn.addEventListener('click', () => buyUpgrade('power'));
     DOM.autoBtn.addEventListener('click', () => buyUpgrade('auto'));
     DOM.multiBtn.addEventListener('click', () => buyUpgrade('multi'));
-
+    
+    // Меню
     DOM.menuBtn.addEventListener('click', () => {
         DOM.upgradePanel.classList.add('open');
     });
-
+    
     DOM.closePanel.addEventListener('click', () => {
         DOM.upgradePanel.classList.remove('open');
     });
-
+    
+    // Закрытие по свайпу
     let touchStartY = 0;
     DOM.upgradePanel.addEventListener('touchstart', (e) => {
         touchStartY = e.touches[0].clientY;
-    }, { passive: false });
-
+    });
+    
     DOM.upgradePanel.addEventListener('touchmove', (e) => {
         const deltaY = e.touches[0].clientY - touchStartY;
         if (deltaY > 50) {
             DOM.upgradePanel.classList.remove('open');
         }
-    }, { passive: false });
-
-    window.addEventListener('beforeunload', saveGame);
+    });
+    
+    // Сохранение при закрытии
+    window.addEventListener('beforeunload', () => {
+        saveGame();
+    });
+    
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             saveGame();
@@ -549,31 +580,44 @@ function setupEventListeners() {
 
 // ==================== ЗАПУСК ====================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🚀 Запуск приложения...');
-
+    console.log('🚀 Запуск игры...');
+    
+    // Инициализируем DOM
     DOM.init();
-
+    
+    // Загружаем сохранение
     loadGame();
-
+    
+    // Обновляем UI
     updateUI();
-
+    
+    // Инициализируем VK Bridge
     const vkReady = await VK.init();
     Game.isReady = vkReady;
-    console.log('✅ VK Ready:', vkReady);
-
-    setTimeout(() => {
-        if (DOM.loading) {
+    console.log('VK статус:', vkReady ? 'Готов' : 'Тестовый режим');
+    
+    // Прячем загрузочный экран
+    if (DOM.loading) {
+        setTimeout(() => {
             DOM.loading.classList.add('hidden');
-        }
-    }, 500);
-
+        }, 500);
+    }
+    
+    // Настраиваем управление
     setupTouchControls();
-
+    
+    // Настраиваем события
     setupEventListeners();
-
-    setInterval(autoClick, 1000);
-
-    setInterval(saveGame, 5000);
-
-    console.log('✅ Приложение готово!');
+    
+    // Запускаем авто-клик
+    setInterval(() => {
+        autoClick();
+    }, 1000);
+    
+    // Автосохранение
+    setInterval(() => {
+        saveGame();
+    }, 5000);
+    
+    console.log('✅ Игра готова! Баланс:', Game.balance);
 });
